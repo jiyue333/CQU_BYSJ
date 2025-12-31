@@ -124,7 +124,8 @@ class StreamService:
         )
         
         self.db.add(stream)
-        await self.db.flush()
+        # 显式提交事务，确保数据对其他会话可见
+        await self.db.commit()
         await self.db.refresh(stream)
         
         logger.info(
@@ -180,7 +181,7 @@ class StreamService:
         
         # 删除数据库记录
         await self.db.delete(stream)
-        await self.db.flush()
+        await self.db.commit()
         
         logger.info("stream_deleted", stream_id=stream_id)
         
@@ -394,7 +395,7 @@ class StreamService:
         # 更新状态为 STOPPED (always update DB state)
         stream.status = StreamStatus.STOPPED
         stream.play_url = None
-        await self.db.flush()
+        await self.db.commit()
         await self.db.refresh(stream)
         
         logger.info("stream_stopped", stream_id=stream_id)

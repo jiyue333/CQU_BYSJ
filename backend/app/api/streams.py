@@ -36,6 +36,32 @@ from app.services.stream_service import (
 router = APIRouter()
 
 
+def _build_webrtc_url(play_url: str | None) -> str | None:
+    """从 play_url 构建 WebRTC URL
+    
+    play_url 格式: http://host:port/live/streamId/hls.m3u8
+    webrtc_url 格式: http://host:port/index/api/webrtc?app=live&stream=streamId&type=play
+    """
+    if not play_url:
+        return None
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(play_url)
+        # 从路径提取 app 和 stream
+        # 格式: /live/streamId/hls.m3u8 或 /live/streamId.flv
+        path_parts = parsed.path.strip('/').split('/')
+        if len(path_parts) >= 2:
+            app = path_parts[0]  # 'live'
+            stream = path_parts[1]  # streamId 或 streamId.flv
+            # 移除可能的扩展名
+            if '.' in stream:
+                stream = stream.rsplit('.', 1)[0]
+            return f"{parsed.scheme}://{parsed.netloc}/index/api/webrtc?app={app}&stream={stream}&type=play"
+    except Exception:
+        pass
+    return None
+
+
 def _stream_to_response(stream, publish_info=None) -> VideoStreamResponse:
     """将 VideoStream 模型转换为响应 Schema"""
     return VideoStreamResponse(
@@ -44,6 +70,7 @@ def _stream_to_response(stream, publish_info=None) -> VideoStreamResponse:
         type=stream.type,
         status=stream.status,
         play_url=stream.play_url,
+        webrtc_url=_build_webrtc_url(stream.play_url),
         source_url=stream.source_url,
         file_id=stream.file_id,
         publish_info=publish_info,

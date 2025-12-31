@@ -12,6 +12,7 @@ import Hls from 'hls.js'
 
 const props = defineProps<{
   playUrl: string | null
+  webrtcUrl?: string | null
   streamId: string
   status?: string
 }>()
@@ -50,6 +51,24 @@ function detectUrlType(url: string): 'flv' | 'hls' | 'unknown' {
   return 'unknown'
 }
 
+// 从 playUrl 推断 WebRTC URL
+function inferWebRTCUrl(playUrl: string): string | null {
+  try {
+    const url = new URL(playUrl)
+    // 从 HLS URL 提取 app 和 stream
+    // 格式: http://host/live/streamId/hls.m3u8
+    const pathParts = url.pathname.split('/').filter(Boolean)
+    if (pathParts.length >= 2) {
+      const app = pathParts[0] // 'live'
+      const stream = pathParts[1] // streamId
+      return `${url.origin}/index/api/webrtc?app=${app}&stream=${stream}&type=play`
+    }
+  } catch {
+    // ignore
+  }
+  return null
+}
+
 // 解析播放地址，获取各协议 URL
 const urls = computed(() => {
   if (!props.playUrl) return null
@@ -68,17 +87,24 @@ const urls = computed(() => {
     baseUrl = props.playUrl
   }
   
-  // Remove extension if present
-  const extMatch = baseUrl.match(/\.(flv|m3u8)$/i)
-  if (extMatch) {
-    baseUrl = baseUrl.substring(0, baseUrl.length - extMatch[0].length)
+  // Remove /hls.m3u8 or extension if present
+  if (baseUrl.endsWith('/hls.m3u8')) {
+    baseUrl = baseUrl.slice(0, -9) // Remove '/hls.m3u8'
+  } else {
+    const extMatch = baseUrl.match(/\.(flv|m3u8)$/i)
+    if (extMatch) {
+      baseUrl = baseUrl.substring(0, baseUrl.length - extMatch[0].length)
+    }
   }
+
+  // WebRTC URL: 优先使用 props，否则从 playUrl 推断
+  const webrtcUrl = props.webrtcUrl || inferWebRTCUrl(props.playUrl)
 
   return {
     flv: baseUrl + '.flv' + queryString,
-    hls: baseUrl + '.m3u8' + queryString,
-    detectedType: urlType,
-    webrtc: null
+    hls: baseUrl + '/hls.m3u8' + queryString,
+    webrtc: webrtcUrl,
+    detectedType: urlType
   }
 })
 
@@ -137,6 +163,187 @@ function setupBufferingListeners() {
   
   videoRef.value.addEventListener('canplay', () => {
     isBuffering.value = false
+  })
+}
+
+// 尝试 WebRTC 播放 (WHEP 协议)
+async function tryWebRTC(token: number): Promise<boolean> {
+  if (!urls.value?.webrtc || !videoRef.value) {
+    console.log('WebRTC: No URL or video element')
+    return false
+  }
+
+  // Check if this attempt is still valid
+  if (token !== playbackToken) {
+    return false
+  }
+
+  console.log('Trying WebRTC:', urls.value.webrtc)
+
+  return new Promise((resolve) => {
+    let resolved = false
+    let gotTrack = false
+    
+    const doResolve = (result: boolean) => {
+      if (resolved) return
+      resolved = true
+      clearTimeout(timeoutId)
+      resolve(result)
+    }
+
+    const timeoutId = setTimeout(() => {
+      // 如果已经收到 track，再等一会儿
+      if (gotTrack && !resolved) {
+        console.log('WebRTC: Got track but still waiting, extending timeout...')
+        setTimeout(() => {
+          if (!resolved) {
+            console.log('WebRTC: Extended timeout reached')
+            if (rtcConnection) {
+              rtcConnection.close()
+              rtcConnection = null
+            }
+            doResolve(false)
+          }
+        }, 5000)
+        return
+      }
+      
+      console.log('WebRTC: Timeout (no track received)')
+      if (rtcConnection) {
+        rtcConnection.close()
+        rtcConnection = null
+      }
+      doResolve(false)
+    }, 8000)
+
+    try {
+      // 创建 RTCPeerConnection
+      rtcConnection = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      })
+
+      // 监听远程流
+      rtcConnection.ontrack = (event) => {
+        console.log('WebRTC: Got remote track', event.track.kind)
+        gotTrack = true
+        
+        if (token !== playbackToken) {
+          doResolve(false)
+          return
+        }
+        
+        if (event.streams && event.streams[0] && videoRef.value) {
+          videoRef.value.srcObject = event.streams[0]
+          
+          // 等待视频可以播放
+          const video = videoRef.value
+          
+          const tryPlay = () => {
+            if (resolved || token !== playbackToken) return
+            
+            video.play().then(() => {
+              if (token === playbackToken && !resolved) {
+                console.log('WebRTC: Playing successfully')
+                currentProtocol.value = 'webrtc'
+                isPlaying.value = true
+                emit('playing')
+                emit('protocolChange', 'WebRTC')
+                doResolve(true)
+              }
+            }).catch((err) => {
+              // 如果是 AbortError，可能是还没准备好，稍后重试
+              if (err.name === 'AbortError' && !resolved) {
+                console.log('WebRTC: Play aborted, will retry on canplay')
+              } else {
+                console.error('WebRTC: Play failed', err)
+                doResolve(false)
+              }
+            })
+          }
+          
+          // 监听 canplay 事件
+          video.addEventListener('canplay', tryPlay, { once: true })
+          
+          // 也立即尝试播放
+          tryPlay()
+        }
+      }
+
+      rtcConnection.oniceconnectionstatechange = () => {
+        console.log('WebRTC ICE state:', rtcConnection?.iceConnectionState)
+        if (rtcConnection?.iceConnectionState === 'connected') {
+          console.log('WebRTC: ICE connected')
+        }
+        if (rtcConnection?.iceConnectionState === 'failed') {
+          console.log('WebRTC: ICE failed')
+          doResolve(false)
+        }
+      }
+
+      // 添加 transceiver 以接收视频和音频
+      rtcConnection.addTransceiver('video', { direction: 'recvonly' })
+      rtcConnection.addTransceiver('audio', { direction: 'recvonly' })
+
+      // 创建 offer
+      rtcConnection.createOffer().then((offer) => {
+        return rtcConnection!.setLocalDescription(offer)
+      }).then(() => {
+        // 等待 ICE gathering 完成或超时
+        return new Promise<void>((iceResolve) => {
+          if (rtcConnection!.iceGatheringState === 'complete') {
+            iceResolve()
+          } else {
+            const checkState = () => {
+              if (rtcConnection?.iceGatheringState === 'complete') {
+                rtcConnection.removeEventListener('icegatheringstatechange', checkState)
+                iceResolve()
+              }
+            }
+            rtcConnection!.addEventListener('icegatheringstatechange', checkState)
+            // 最多等待 2 秒
+            setTimeout(iceResolve, 2000)
+          }
+        })
+      }).then(() => {
+        // 发送 offer 到 ZLMediaKit WebRTC API
+        const sdp = rtcConnection!.localDescription!.sdp
+        return fetch(urls.value!.webrtc!, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/sdp' },
+          body: sdp
+        })
+      }).then(async (response) => {
+        if (!response.ok) {
+          // 尝试读取 JSON 错误
+          const text = await response.text()
+          console.error('WebRTC: Server error', response.status, text)
+          throw new Error(`Server error: ${response.status}`)
+        }
+        const contentType = response.headers.get('content-type') || ''
+        if (contentType.includes('application/sdp')) {
+          return response.text()
+        } else {
+          // ZLMediaKit 可能返回 JSON
+          const json = await response.json()
+          if (json.code === 0 && json.sdp) {
+            return json.sdp
+          }
+          throw new Error(json.msg || 'Invalid response')
+        }
+      }).then((answerSdp) => {
+        console.log('WebRTC: Got answer SDP')
+        return rtcConnection!.setRemoteDescription({
+          type: 'answer',
+          sdp: answerSdp
+        })
+      }).catch((err) => {
+        console.error('WebRTC: Setup failed', err)
+        doResolve(false)
+      })
+    } catch (err) {
+      console.error('WebRTC: Init error', err)
+      doResolve(false)
+    }
   })
 }
 
@@ -312,44 +519,37 @@ async function startPlayback() {
   // Get current token for this playback attempt
   const token = playbackToken
 
-  // Determine protocol order based on detected URL type
-  const detectedType = urls.value?.detectedType
+  // 协议优先级：WebRTC → HTTP-FLV → HLS
+  // WebRTC 延迟最低，适合实时监控
   
-  if (detectedType === 'hls') {
-    // If URL is HLS, try HLS first
-    console.log('Detected HLS URL, trying HLS first...')
-    if (await tryHls(token)) {
+  // 1. 尝试 WebRTC (最低延迟)
+  if (urls.value?.webrtc) {
+    console.log('Trying WebRTC first (lowest latency)...')
+    if (await tryWebRTC(token)) {
       return
     }
-    
-    // Fallback to FLV
-    if (hlsPlayer) {
-      hlsPlayer.destroy()
-      hlsPlayer = null
+    // 清理失败的 WebRTC 连接
+    if (rtcConnection) {
+      rtcConnection.close()
+      rtcConnection = null
     }
-    
-    console.log('Trying HTTP-FLV...')
-    if (await tryFlv(token)) {
-      return
-    }
-  } else {
-    // Default: try FLV first (lower latency)
-    console.log('Trying HTTP-FLV...')
-    if (await tryFlv(token)) {
-      return
-    }
+  }
 
-    // 清理失败的 FLV 播放器
-    if (flvPlayer) {
-      flvPlayer.destroy()
-      flvPlayer = null
-    }
+  // 2. 尝试 HTTP-FLV (低延迟)
+  console.log('Trying HTTP-FLV...')
+  if (await tryFlv(token)) {
+    return
+  }
+  // 清理失败的 FLV 播放器
+  if (flvPlayer) {
+    flvPlayer.destroy()
+    flvPlayer = null
+  }
 
-    // 降级到 HLS
-    console.log('Trying HLS...')
-    if (await tryHls(token)) {
-      return
-    }
+  // 3. 降级到 HLS (兼容性最好)
+  console.log('Trying HLS...')
+  if (await tryHls(token)) {
+    return
   }
 
   // Check if this attempt is still valid before showing error

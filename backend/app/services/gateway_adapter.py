@@ -108,17 +108,19 @@ class ZLMediaKitAdapter(GatewayAdapter):
     def __init__(
         self, 
         base_url: str = settings.zlm_base_url,
+        external_url: str = settings.zlm_external_url,
         secret: str = settings.zlm_secret,
         rtsp_port: int = settings.zlm_rtsp_port
     ):
-        self.base_url = base_url.rstrip("/")
+        self.base_url = base_url.rstrip("/")  # 内部访问地址（API 调用）
+        self.external_url = external_url.rstrip("/")  # 外部访问地址（播放地址）
         self.secret = secret
         self.rtsp_port = rtsp_port
         self.app = "live"
         self.vhost = "__defaultVhost__"
-        parsed = urlparse(self.base_url)
+        parsed = urlparse(self.external_url)
         self.host = parsed.hostname or "localhost"
-        logger.info(f"ZLMediaKitAdapter initialized: base_url={self.base_url}")
+        logger.info(f"ZLMediaKitAdapter initialized: base_url={self.base_url}, external_url={self.external_url}")
     
     async def _call_api(self, path: str, params: dict, timeout: float = 10.0) -> dict:
         """Call ZLMediaKit API."""
@@ -142,13 +144,16 @@ class ZLMediaKitAdapter(GatewayAdapter):
             raise GatewayConnectionError(f"Connection failed: {e}") from e
     
     def _build_play_urls(self, stream_id: str) -> StreamInfo:
-        """Build play URLs for all protocols."""
+        """Build play URLs for all protocols.
+        
+        使用 external_url 生成播放地址，供浏览器访问。
+        """
         return StreamInfo(
             stream_id=stream_id,
-            play_url=f"{self.base_url}/{self.app}/{stream_id}.live.flv",
-            hls_url=f"{self.base_url}/{self.app}/{stream_id}/hls.m3u8",
+            play_url=f"{self.external_url}/{self.app}/{stream_id}/hls.m3u8",
+            hls_url=f"{self.external_url}/{self.app}/{stream_id}/hls.m3u8",
             rtsp_url=f"rtsp://{self.host}:{self.rtsp_port}/{self.app}/{stream_id}",
-            webrtc_url=f"{self.base_url}/index/api/webrtc?app={self.app}&stream={stream_id}&type=play"
+            webrtc_url=f"{self.external_url}/index/api/webrtc?app={self.app}&stream={stream_id}&type=play"
         )
 
 
@@ -192,7 +197,7 @@ class ZLMediaKitAdapter(GatewayAdapter):
         expires_at = int(time.time()) + 300
         stream_info = self._build_play_urls(stream_id)
         publish_info = PublishInfo(
-            whip_url=f"{self.base_url}/index/api/webrtc?app={self.app}&stream={stream_id}&type=push",
+            whip_url=f"{self.external_url}/index/api/webrtc?app={self.app}&stream={stream_id}&type=push",
             token=token, expires_at=expires_at,
             ice_servers=[{"urls": ["stun:stun.l.google.com:19302"]}]
         )

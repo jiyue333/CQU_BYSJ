@@ -1,0 +1,229 @@
+# Docker Compose 生产环境配置
+# 人流计数与密度分析系统
+#
+# 使用方法：
+#   构建并启动：docker-compose -f docker-compose.prod.yml up -d --build
+#   查看日志：docker-compose -f docker-compose.prod.yml logs -f
+#   停止服务：docker-compose -f docker-compose.prod.yml down
+#
+# 首次启动前：
+#   1. 复制 .env.example 为 .env 并修改配置
+#   2. 确保 ZLM_SECRET 与 zlm-config/config.ini 中的 secret 一致
+
+services:
+  # ============================================
+  # 前端服务 (Vue 3 + Nginx)
+  # ============================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: crowd-counting-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - crowd-counting-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # 后端 API 服务 (FastAPI)
+  # ============================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: crowd-counting-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # 数据库配置
+      DATABASE_URL: postgresql+asyncpg://crowd_user:${POSTGRES_PASSWORD:-crowd_pass_dev}@postgres:5432/crowd_counting
+      # Redis 配置
+      REDIS_URL: redis://redis:6379/0
+      # ZLMediaKit 配置
+      ZLM_BASE_URL: http://zlmediakit:80
+      ZLM_EXTERNAL_URL: ${ZLM_EXTERNAL_URL:-http://localhost:8080}
+      ZLM_SECRET: ${ZLM_SECRET:-your_api_secret_here}
+      ZLM_RTSP_PORT: 554
+      ZLM_HTTP_PORT: 80
+      # 文件存储
+      FILE_STORAGE_PATH: /data/uploads
+      FILE_MAX_SIZE_MB: ${FILE_MAX_SIZE_MB:-500}
+      # 系统配置
+      MAX_CONCURRENT_STREAMS: ${MAX_CONCURRENT_STREAMS:-10}
+      AUTO_STOP_DELAY: ${AUTO_STOP_DELAY:-60}
+      COOLDOWN_DURATION: ${COOLDOWN_DURATION:-60}
+      # CORS
+      CORS_ORIGINS: '["http://localhost:3000","http://localhost:5173"]'
+      # 日志
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: json
+    volumes:
+      - ./uploads:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      zlmediakit:
+        condition: service_started
+    networks:
+      - crowd-counting-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  # ============================================
+  # 推理服务 (YOLO Worker)
+  # 独立的推理服务，通过 Redis 与后端通信
+  # 支持水平扩展：docker-compose up -d --scale inference=3
+  # ============================================
+  inference:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.inference
+    # 注意：水平扩展时不要设置 container_name
+    # container_name: crowd-counting-inference
+    restart: unless-stopped
+    environment:
+      # Redis 配置
+      REDIS_URL: redis://redis:6379/0
+      # ZLMediaKit 配置（用于抓取快照）
+      ZLM_BASE_URL: http://zlmediakit:80
+      ZLM_SECRET: ${ZLM_SECRET:-your_api_secret_here}
+      # 推理配置
+      INFERENCE_FPS: ${INFERENCE_FPS:-2}
+      CONFIDENCE_THRESHOLD: ${CONFIDENCE_THRESHOLD:-0.5}
+      HEATMAP_GRID_SIZE: ${HEATMAP_GRID_SIZE:-20}
+      HEATMAP_DECAY: ${HEATMAP_DECAY:-0.3}
+      # 快照配置
+      SNAP_TIMEOUT_SEC: ${SNAP_TIMEOUT_SEC:-2.0}
+      SNAP_MAX_FAILURES: ${SNAP_MAX_FAILURES:-5}
+      SNAP_BACKOFF_BASE: ${SNAP_BACKOFF_BASE:-1.0}
+      SNAP_BACKOFF_MAX: ${SNAP_BACKOFF_MAX:-30.0}
+      # 冷却配置
+      COOLDOWN_DURATION: ${COOLDOWN_DURATION:-60}
+      # Redis Streams 配置
+      STREAM_RESULT_MAXLEN: ${STREAM_RESULT_MAXLEN:-500}
+      STREAM_STATUS_MAXLEN: ${STREAM_STATUS_MAXLEN:-1000}
+      # 日志
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: json
+    depends_on:
+      redis:
+        condition: service_healthy
+      zlmediakit:
+        condition: service_started
+    networks:
+      - crowd-counting-net
+    # GPU 支持（可选，取消注释以启用）
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "inference_main.py"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+  # ============================================
+  # PostgreSQL 数据库
+  # ============================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: crowd-counting-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: crowd_counting
+      POSTGRES_USER: crowd_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crowd_pass_dev}
+      TZ: Asia/Shanghai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - crowd-counting-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crowd_user -d crowd_counting"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # Redis 缓存与消息队列
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: crowd-counting-redis
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - crowd-counting-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: >
+      redis-server 
+      --appendonly yes 
+      --maxmemory 256mb 
+      --maxmemory-policy allkeys-lru
+
+  # ============================================
+  # ZLMediaKit 媒体网关
+  # ============================================
+  zlmediakit:
+    image: zlmediakit/zlmediakit:master
+    container_name: crowd-counting-zlmediakit
+    restart: unless-stopped
+    ports:
+      - "8080:80"          # HTTP API / HTTP-FLV / HLS
+      - "8443:443"         # HTTPS
+      - "1935:1935"        # RTMP
+      - "8554:554"         # RTSP
+      - "10000:10000"      # RTP TCP
+      - "10000:10000/udp"  # RTP UDP
+      - "8000:8000/udp"    # WebRTC
+    volumes:
+      - ./zlm-config:/opt/media/conf
+      - ./zlm-logs:/opt/media/log
+      - ./zlm-media:/opt/media/www
+      - ./uploads:/data/uploads
+    environment:
+      TZ: Asia/Shanghai
+    networks:
+      - crowd-counting-net
+
+networks:
+  crowd-counting-net:
+    driver: bridge
+
+volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local

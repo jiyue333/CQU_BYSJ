@@ -32,7 +32,8 @@ class Settings(BaseSettings):
     stream_recover_count: int = 50  # 断点续传最大恢复消息数
 
     # ZLMediaKit 配置
-    zlm_base_url: str = "http://localhost:8080"
+    zlm_base_url: str = "http://localhost:8080"  # 内部访问地址（容器间通信）
+    zlm_external_url: str = "http://localhost:8080"  # 外部访问地址（浏览器访问）
     zlm_secret: str = ""
     zlm_rtsp_port: int = 554
     zlm_http_port: int = 80

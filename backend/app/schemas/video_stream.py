@@ -12,9 +12,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.models.video_stream import StreamStatus, StreamType
 
 
-# UUID v4 正则表达式
+# UUID v4 正则表达式（支持带扩展名的格式，如 xxx.mp4）
 UUID_PATTERN = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(\.[a-z0-9]+)?$",
     re.IGNORECASE
 )
 
@@ -40,8 +40,8 @@ class VideoStreamCreate(VideoStreamBase):
     )
     file_id: Optional[str] = Field(
         None,
-        max_length=36,
-        description="文件 ID（仅 file 类型需要）"
+        max_length=50,
+        description="文件 ID（仅 file 类型需要，格式：UUID.扩展名）"
     )
 
     @field_validator("source_url")
@@ -59,10 +59,10 @@ class VideoStreamCreate(VideoStreamBase):
     @field_validator("file_id")
     @classmethod
     def validate_file_id_format(cls, v: Optional[str]) -> Optional[str]:
-        """验证文件 ID 格式（UUID v4）"""
+        """验证文件 ID 格式（UUID v4，可带扩展名如 xxx.mp4）"""
         if v is not None:
             if not UUID_PATTERN.match(v):
-                raise ValueError("file_id 必须是有效的 UUID v4 格式")
+                raise ValueError("file_id 必须是有效的 UUID v4 格式（可带扩展名，如 xxx-xxx.mp4）")
         return v
 
     @model_validator(mode="after")
@@ -119,7 +119,8 @@ class VideoStreamResponse(VideoStreamBase):
     id: str = Field(..., alias="stream_id", description="视频流唯一标识")
     type: StreamType = Field(..., description="视频流类型")
     status: StreamStatus = Field(..., description="当前状态")
-    play_url: Optional[str] = Field(None, description="播放地址")
+    play_url: Optional[str] = Field(None, description="播放地址 (HLS)")
+    webrtc_url: Optional[str] = Field(None, description="WebRTC 播放地址")
     source_url: Optional[str] = Field(None, description="RTSP 地址")
     file_id: Optional[str] = Field(None, description="文件 ID")
     publish_info: Optional[PublishInfo] = Field(None, description="推流信息（仅 webcam 类型）")
