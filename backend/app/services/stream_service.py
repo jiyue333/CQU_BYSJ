@@ -151,14 +151,20 @@ class StreamService:
         
         如果流正在运行，先停止再删除。
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         stream = await self.get_or_raise(stream_id)
         
         # 如果正在运行，先停止
         if stream.status == StreamStatus.RUNNING:
             await self.stop(stream_id)
         
-        # 删除网关中的流
-        await self.gateway.delete_stream(stream_id)
+        # 删除网关中的流 (best effort)
+        try:
+            await self.gateway.delete_stream(stream_id)
+        except Exception as e:
+            logger.warning(f"Failed to delete stream from gateway during delete: {e}")
         
         # 删除数据库记录
         await self.db.delete(stream)
@@ -207,6 +213,7 @@ class StreamService:
         
         publish_info: Optional[PublishInfo] = None
         
+        gateway_created = False
         try:
             # 根据类型调用网关创建流
             stream_info: Optional[StreamInfo] = None
@@ -216,6 +223,7 @@ class StreamService:
                     stream_id=stream_id,
                     rtsp_url=stream.source_url,
                 )
+                gateway_created = True
             elif stream.type == StreamType.FILE:
                 # Verify file exists before calling gateway
                 try:
@@ -231,10 +239,12 @@ class StreamService:
                     stream_id=stream_id,
                     file_path=file_path,
                 )
+                gateway_created = True
             elif stream.type == StreamType.WEBCAM:
                 stream_info, publish_info = await self.gateway.create_webcam_ingest(
                     stream_id=stream_id
                 )
+                gateway_created = True
             
             if stream_info:
                 stream.play_url = stream_info.play_url
@@ -245,14 +255,37 @@ class StreamService:
             
             # 如果启用推理，发送 START 指令
             if options.enable_infer:
-                await self.inference_control.send_start(
-                    stream_id=stream_id,
-                    fps=settings.inference_fps
-                )
+                try:
+                    await self.inference_control.send_start(
+                        stream_id=stream_id,
+                        fps=settings.inference_fps
+                    )
+                except Exception as infer_err:
+                    # 推理服务启动失败，回滚网关资源
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Inference start failed, rolling back gateway: {infer_err}")
+                    if gateway_created:
+                        try:
+                            await self.gateway.delete_stream(stream_id)
+                        except Exception:
+                            pass  # Best effort cleanup
+                    stream.status = StreamStatus.ERROR
+                    stream.play_url = None
+                    await self.db.flush()
+                    raise GatewayError(f"Failed to start inference: {infer_err}") from infer_err
             
+        except GatewayError:
+            raise
         except Exception as e:
-            # 网关错误，更新状态为 ERROR
+            # 网关错误，更新状态为 ERROR，并清理已创建的网关资源
+            if gateway_created:
+                try:
+                    await self.gateway.delete_stream(stream_id)
+                except Exception:
+                    pass  # Best effort cleanup
             stream.status = StreamStatus.ERROR
+            stream.play_url = None
             await self.db.flush()
             raise GatewayError(f"Failed to start stream: {e}") from e
         
@@ -287,6 +320,9 @@ class StreamService:
             StreamNotFoundError: 流不存在
             InvalidStateTransitionError: 无效状态转换
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         stream = await self.get_or_raise(stream_id)
         
         # 检查状态转换是否有效
@@ -296,12 +332,20 @@ class StreamService:
             )
         
         # 发送 STOP 指令（无论 enable_infer 设置，强制停止推理）
-        await self.inference_control.send_stop(stream_id=stream_id)
+        # Best effort - don't fail if inference control fails
+        try:
+            await self.inference_control.send_stop(stream_id=stream_id)
+        except Exception as e:
+            logger.warning(f"Failed to send stop to inference control: {e}")
         
         # 删除网关中的流
-        await self.gateway.delete_stream(stream_id)
+        # Best effort - don't fail if gateway fails
+        try:
+            await self.gateway.delete_stream(stream_id)
+        except Exception as e:
+            logger.warning(f"Failed to delete stream from gateway: {e}")
         
-        # 更新状态为 STOPPED
+        # 更新状态为 STOPPED (always update DB state)
         stream.status = StreamStatus.STOPPED
         stream.play_url = None
         await self.db.flush()

@@ -224,10 +224,8 @@ class StatusPushService:
         })
         
         for ws in self.connections.copy():
-            try:
-                await ws.send_text(message)
-            except Exception as e:
-                logger.error(f"Failed to send status notification: {e}")
+            success = await self._send_with_timeout(ws, message)
+            if not success:
                 self._cleanup_connection(ws)
 
 

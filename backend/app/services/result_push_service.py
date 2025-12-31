@@ -287,10 +287,14 @@ class ResultPushService:
                     "data": json.loads(result_data) if isinstance(result_data, str) else result_data
                 })
                 
-                await websocket.send_text(message)
+                # Use timeout to avoid blocking on slow clients
+                success = await self._send_with_timeout(websocket, message)
+                if not success:
+                    logger.warning(f"Failed to send recovery message {msg_id} to stream {stream_id}")
+                    break
                 
             # 发送恢复完成消息
-            await websocket.send_text(json.dumps({
+            await self._send_with_timeout(websocket, json.dumps({
                 "type": "recovery_complete",
                 "count": len(messages)
             }))
