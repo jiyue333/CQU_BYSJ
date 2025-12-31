@@ -1,5 +1,3 @@
-services:
-  # PostgreSQL 数据库
   postgres:
     image: postgres:15-alpine
     container_name: crowd-counting-postgres

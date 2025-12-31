@@ -11,6 +11,10 @@ from alembic import context
 from app.core.config import settings
 from app.core.database import Base
 
+# Import all models to ensure they are registered with Base.metadata
+# This is required for Alembic autogenerate to detect model changes
+from app.models import VideoStream, ROI, SystemConfig, HistoryStat  # noqa: F401
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
@@ -25,8 +29,6 @@ if config.config_file_name is not None:
 
 # add your model's MetaData object here
 # for 'autogenerate' support
-# Import all models here to ensure they are registered with Base.metadata
-# from app.models import video_stream, roi, detection_result, system_config, history_stat
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
