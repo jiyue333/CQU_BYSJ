@@ -31,12 +31,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if not await check_redis_connection():
         raise RuntimeError("Redis connection failed")
     
-    # TODO: 启动 Redis Streams 监听（检测结果与状态上报）
-    # TODO: 启动 Redis PubSub 监听（控制指令）
+    # 启动 WebSocket 推送服务
+    from app.services.result_push_service import get_result_push_service
+    from app.services.status_push_service import get_status_push_service
+    print("Starting WebSocket push services...")
+    result_push_service = get_result_push_service()
+    status_push_service = get_status_push_service()
+    await result_push_service.start()
+    await status_push_service.start()
     
     print("Application startup complete")
     
     yield
+    
+    # 停止 WebSocket 推送服务
+    print("Stopping WebSocket push services...")
+    await result_push_service.stop()
+    await status_push_service.stop()
     
     # 清理资源
     print("Closing database connections...")
@@ -69,9 +80,12 @@ async def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
-# TODO: 注册路由
-# from app.api import streams, rois, config, history
-# app.include_router(streams.router, prefix="/api/streams", tags=["streams"])
+# 注册路由
+from app.api import streams, websockets
+app.include_router(streams.router, prefix="/api/streams", tags=["streams"])
+app.include_router(websockets.router, prefix="/ws", tags=["websockets"])
+# TODO: 注册其他路由
+# from app.api import rois, config, history
 # app.include_router(rois.router, prefix="/api", tags=["rois"])
 # app.include_router(config.router, prefix="/api/config", tags=["config"])
 # app.include_router(history.router, prefix="/api", tags=["history"])
