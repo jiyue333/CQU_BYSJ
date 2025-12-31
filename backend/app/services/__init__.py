@@ -8,6 +8,9 @@ from app.services.gateway_adapter import (
     ZLMediaKitAdapter,
     StreamInfo,
     PublishInfo,
+    GatewayError,
+    GatewayConnectionError,
+    GatewayAPIError,
     get_gateway_adapter,
 )
 from app.services.inference_control import (
@@ -20,7 +23,6 @@ from app.services.stream_service import (
     StreamNotFoundError,
     ConcurrentLimitError,
     InvalidStateTransitionError,
-    GatewayError,
     get_stream_service,
 )
 from app.services.result_push_service import (
@@ -31,6 +33,13 @@ from app.services.status_push_service import (
     StatusPushService,
     get_status_push_service,
 )
+from app.services.file_storage_service import (
+    FileStorageService,
+    FileStorageError,
+    FileTooLargeError,
+    InvalidFileTypeError,
+    get_file_storage_service,
+)
 
 __all__ = [
     # Gateway Adapter
@@ -38,6 +47,9 @@ __all__ = [
     "ZLMediaKitAdapter",
     "StreamInfo",
     "PublishInfo",
+    "GatewayError",
+    "GatewayConnectionError",
+    "GatewayAPIError",
     "get_gateway_adapter",
     # Inference Control
     "InferenceControlService",
@@ -48,7 +60,6 @@ __all__ = [
     "StreamNotFoundError",
     "ConcurrentLimitError",
     "InvalidStateTransitionError",
-    "GatewayError",
     "get_stream_service",
     # Result Push Service
     "ResultPushService",
@@ -56,4 +67,10 @@ __all__ = [
     # Status Push Service
     "StatusPushService",
     "get_status_push_service",
+    # File Storage Service
+    "FileStorageService",
+    "FileStorageError",
+    "FileTooLargeError",
+    "InvalidFileTypeError",
+    "get_file_storage_service",
 ]

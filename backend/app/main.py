@@ -81,8 +81,9 @@ async def health_check() -> dict[str, str]:
 
 
 # 注册路由
-from app.api import streams, websockets
+from app.api import files, streams, websockets
 app.include_router(streams.router, prefix="/api/streams", tags=["streams"])
+app.include_router(files.router, prefix="/api/files", tags=["files"])
 app.include_router(websockets.router, prefix="/ws", tags=["websockets"])
 # TODO: 注册其他路由
 # from app.api import rois, config, history

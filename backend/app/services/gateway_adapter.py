@@ -1,284 +1,284 @@
-"""媒体网关适配层
+"""Media Gateway Adapter Layer
 
-抽象接口定义和 ZLMediaKit 实现。
-隔离网关差异，Stream Manager 内部统一调用 GatewayAdapter。
+Abstract interface and ZLMediaKit implementation.
+Isolates gateway differences, Stream Manager calls GatewayAdapter uniformly.
 """
 
+import logging
+import secrets
+import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
+from urllib.parse import urlparse
 
 import aiohttp
 
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class StreamInfo:
-    """流信息"""
+    """Stream information with all protocol URLs."""
     stream_id: str
-    play_url: str                    # 浏览器播放地址（HTTP-FLV）
-    rtsp_url: Optional[str] = None   # RTSP 播放地址
-    hls_url: Optional[str] = None    # HLS 播放地址
-    webrtc_url: Optional[str] = None # WebRTC 播放地址
+    play_url: str
+    rtsp_url: Optional[str] = None
+    hls_url: Optional[str] = None
+    webrtc_url: Optional[str] = None
 
 
 @dataclass
 class PublishInfo:
-    """浏览器摄像头推流所需信息"""
-    whip_url: str                    # WHIP 推流地址
-    token: str                       # 短期有效 token
-    expires_at: int                  # 过期时间戳
-    ice_servers: list                # STUN/TURN 服务器列表
+    """Browser webcam publish info for WebRTC WHIP protocol."""
+    whip_url: str
+    token: str
+    expires_at: int
+    ice_servers: list = field(default_factory=list)
+
+
+class GatewayError(Exception):
+    """Base gateway error."""
+    pass
+
+
+class GatewayConnectionError(GatewayError):
+    """Gateway connection error."""
+    pass
+
+
+class GatewayAPIError(GatewayError):
+    """Gateway API call error."""
+    def __init__(self, message: str, code: int = -1):
+        super().__init__(message)
+        self.code = code
 
 
 class GatewayAdapter(ABC):
-    """媒体网关适配层抽象接口"""
+    """Abstract media gateway adapter interface."""
     
     @abstractmethod
     async def create_rtsp_proxy(
-        self, 
-        stream_id: str, 
-        rtsp_url: str,
-        retry_count: int = 3,
-        timeout_sec: int = 10
+        self, stream_id: str, rtsp_url: str,
+        retry_count: int = 3, timeout_sec: int = 10
     ) -> StreamInfo:
-        """创建 RTSP 拉流代理"""
+        """Create RTSP pull proxy."""
         pass
     
     @abstractmethod
     async def create_file_stream(
-        self, 
-        stream_id: str, 
-        file_path: str,
-        realtime: bool = True
+        self, stream_id: str, file_path: str,
+        realtime: bool = True, loop: bool = True
     ) -> StreamInfo:
-        """创建文件转流"""
+        """Create file stream."""
         pass
     
     @abstractmethod
-    async def create_webcam_ingest(
-        self, 
-        stream_id: str
-    ) -> tuple[StreamInfo, PublishInfo]:
-        """创建浏览器摄像头推流会话"""
+    async def create_webcam_ingest(self, stream_id: str) -> tuple[StreamInfo, PublishInfo]:
+        """Create webcam ingest session."""
         pass
     
     @abstractmethod
     async def delete_stream(self, stream_id: str) -> bool:
-        """删除流"""
+        """Delete stream."""
         pass
     
     @abstractmethod
     async def get_snapshot(
-        self, 
-        stream_id: str, 
-        timeout_sec: float = 2.0,
-        expire_sec: int = 1
+        self, stream_id: str, timeout_sec: float = 2.0, expire_sec: int = 1
     ) -> Optional[bytes]:
-        """获取快照（JPEG bytes）"""
+        """Get snapshot (JPEG bytes)."""
         pass
     
     @abstractmethod
     async def get_stream_info(self, stream_id: str) -> Optional[StreamInfo]:
-        """获取流信息"""
+        """Get stream info."""
+        pass
+    
+    @abstractmethod
+    async def health_check(self) -> bool:
+        """Health check."""
         pass
 
 
 class ZLMediaKitAdapter(GatewayAdapter):
-    """ZLMediaKit 适配器实现"""
+    """ZLMediaKit adapter implementation."""
     
     def __init__(
         self, 
         base_url: str = settings.zlm_base_url,
-        secret: str = settings.zlm_secret
+        secret: str = settings.zlm_secret,
+        rtsp_port: int = settings.zlm_rtsp_port
     ):
         self.base_url = base_url.rstrip("/")
         self.secret = secret
-        self.app = "live"  # ZLMediaKit 应用名
+        self.rtsp_port = rtsp_port
+        self.app = "live"
         self.vhost = "__defaultVhost__"
+        parsed = urlparse(self.base_url)
+        self.host = parsed.hostname or "localhost"
+        logger.info(f"ZLMediaKitAdapter initialized: base_url={self.base_url}")
     
-    async def _call_api(
-        self, 
-        path: str, 
-        params: dict,
-        timeout: float = 10.0
-    ) -> dict:
-        """调用 ZLMediaKit API"""
+    async def _call_api(self, path: str, params: dict, timeout: float = 10.0) -> dict:
+        """Call ZLMediaKit API."""
         url = f"{self.base_url}{path}"
         params["secret"] = self.secret
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                url, 
-                params=params, 
-                timeout=aiohttp.ClientTimeout(total=timeout)
-            ) as resp:
-                if resp.status != 200:
-                    raise Exception(f"ZLMediaKit API error: {resp.status}")
-                data = await resp.json()
-                if data.get("code") != 0:
-                    raise Exception(f"ZLMediaKit API error: {data.get('msg', 'Unknown error')}")
-                return data
-    
-    def _build_play_urls(self, stream_id: str) -> StreamInfo:
-        """构建播放地址"""
-        return StreamInfo(
-            stream_id=stream_id,
-            play_url=f"{self.base_url}/{self.app}/{stream_id}.live.flv",
-            hls_url=f"{self.base_url}/{self.app}/{stream_id}/hls.m3u8",
-            rtsp_url=f"rtsp://{self.base_url.replace('http://', '').replace('https://', '').split(':')[0]}:{settings.zlm_rtsp_port}/{self.app}/{stream_id}",
-            webrtc_url=f"{self.base_url}/index/api/webrtc?app={self.app}&stream={stream_id}&type=play"
-        )
-    
-    async def create_rtsp_proxy(
-        self, 
-        stream_id: str, 
-        rtsp_url: str,
-        retry_count: int = 3,
-        timeout_sec: int = 10
-    ) -> StreamInfo:
-        """调用 ZLMediaKit addStreamProxy API 创建 RTSP 拉流代理"""
-        await self._call_api("/index/api/addStreamProxy", {
-            "vhost": self.vhost,
-            "app": self.app,
-            "stream": stream_id,
-            "url": rtsp_url,
-            "retry_count": retry_count,
-            "timeout_sec": timeout_sec,
-            "enable_hls": 1,
-            "enable_mp4": 0,
-            "enable_rtsp": 1,
-            "enable_rtmp": 1,
-            "enable_ts": 0,
-            "enable_fmp4": 0,
-        })
-        return self._build_play_urls(stream_id)
-
-    async def create_file_stream(
-        self, 
-        stream_id: str, 
-        file_path: str,
-        realtime: bool = True
-    ) -> StreamInfo:
-        """调用 ZLMediaKit addFFmpegSource API 创建文件转流"""
-        # FFmpeg 参数：-re 表示按实时节奏输出，-stream_loop -1 表示循环播放
-        ffmpeg_cmd_send = ""
-        if realtime:
-            ffmpeg_cmd_send = "-re"
-        
-        await self._call_api("/index/api/addFFmpegSource", {
-            "vhost": self.vhost,
-            "app": self.app,
-            "stream": stream_id,
-            "src_url": file_path,
-            "dst_url": f"rtmp://127.0.0.1/{self.app}/{stream_id}",
-            "timeout_ms": 10000,
-            "enable_hls": 1,
-            "enable_mp4": 0,
-            "ffmpeg_cmd_key": ffmpeg_cmd_send,
-        })
-        return self._build_play_urls(stream_id)
-    
-    async def create_webcam_ingest(
-        self, 
-        stream_id: str
-    ) -> tuple[StreamInfo, PublishInfo]:
-        """创建浏览器摄像头推流会话
-        
-        ZLMediaKit 支持 WebRTC 推流（WHIP 协议）
-        """
-        import time
-        import secrets
-        
-        # 生成短期有效 token
-        token = secrets.token_urlsafe(32)
-        expires_at = int(time.time()) + 300  # 5 分钟有效期
-        
-        stream_info = self._build_play_urls(stream_id)
-        
-        publish_info = PublishInfo(
-            whip_url=f"{self.base_url}/index/api/webrtc?app={self.app}&stream={stream_id}&type=push",
-            token=token,
-            expires_at=expires_at,
-            ice_servers=[
-                {"urls": ["stun:stun.l.google.com:19302"]}
-            ]
-        )
-        
-        return stream_info, publish_info
-    
-    async def delete_stream(self, stream_id: str) -> bool:
-        """删除流"""
-        try:
-            # 尝试删除代理流
-            await self._call_api("/index/api/delStreamProxy", {
-                "key": f"{self.vhost}/{self.app}/{stream_id}"
-            })
-            return True
-        except Exception:
-            try:
-                # 尝试关闭流
-                await self._call_api("/index/api/close_streams", {
-                    "vhost": self.vhost,
-                    "app": self.app,
-                    "stream": stream_id,
-                    "force": 1
-                })
-                return True
-            except Exception:
-                return False
-    
-    async def get_snapshot(
-        self, 
-        stream_id: str, 
-        timeout_sec: float = 2.0,
-        expire_sec: int = 1
-    ) -> Optional[bytes]:
-        """调用 ZLMediaKit getSnap API 获取快照"""
-        url = f"{self.base_url}/index/api/getSnap"
-        params = {
-            "secret": self.secret,
-            "url": f"rtsp://127.0.0.1/{self.app}/{stream_id}",
-            "timeout_sec": timeout_sec,
-            "expire_sec": expire_sec
-        }
+        logger.debug(f"Calling ZLMediaKit API: {path}")
         
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
-                    url, 
-                    params=params, 
+                    url, params=params,
+                    timeout=aiohttp.ClientTimeout(total=timeout)
+                ) as resp:
+                    if resp.status != 200:
+                        raise GatewayConnectionError(f"HTTP error: {resp.status}")
+                    data = await resp.json()
+                    if data.get("code") != 0:
+                        raise GatewayAPIError(data.get("msg", "Unknown error"), data.get("code", -1))
+                    return data
+        except aiohttp.ClientError as e:
+            raise GatewayConnectionError(f"Connection failed: {e}") from e
+    
+    def _build_play_urls(self, stream_id: str) -> StreamInfo:
+        """Build play URLs for all protocols."""
+        return StreamInfo(
+            stream_id=stream_id,
+            play_url=f"{self.base_url}/{self.app}/{stream_id}.live.flv",
+            hls_url=f"{self.base_url}/{self.app}/{stream_id}/hls.m3u8",
+            rtsp_url=f"rtsp://{self.host}:{self.rtsp_port}/{self.app}/{stream_id}",
+            webrtc_url=f"{self.base_url}/index/api/webrtc?app={self.app}&stream={stream_id}&type=play"
+        )
+
+
+    async def create_rtsp_proxy(
+        self, stream_id: str, rtsp_url: str,
+        retry_count: int = 3, timeout_sec: int = 10
+    ) -> StreamInfo:
+        """Create RTSP pull proxy via addStreamProxy API."""
+        logger.info(f"Creating RTSP proxy: stream_id={stream_id}")
+        await self._call_api("/index/api/addStreamProxy", {
+            "vhost": self.vhost, "app": self.app, "stream": stream_id,
+            "url": rtsp_url, "retry_count": retry_count, "timeout_sec": timeout_sec,
+            "enable_hls": 1, "enable_mp4": 0, "enable_rtsp": 1, "enable_rtmp": 1,
+        })
+        return self._build_play_urls(stream_id)
+
+    async def create_file_stream(
+        self, stream_id: str, file_path: str,
+        realtime: bool = True, loop: bool = True
+    ) -> StreamInfo:
+        """Create file stream via addFFmpegSource API."""
+        logger.info(f"Creating file stream: stream_id={stream_id}, file_path={file_path}")
+        ffmpeg_cmd_key = ""
+        if realtime:
+            ffmpeg_cmd_key = "-re"
+        if loop:
+            ffmpeg_cmd_key = f"{ffmpeg_cmd_key} -stream_loop -1" if ffmpeg_cmd_key else "-stream_loop -1"
+        
+        dst_url = f"rtmp://127.0.0.1/{self.app}/{stream_id}"
+        await self._call_api("/index/api/addFFmpegSource", {
+            "vhost": self.vhost, "app": self.app, "stream": stream_id,
+            "src_url": file_path, "dst_url": dst_url, "timeout_ms": 10000,
+            "enable_hls": 1, "enable_mp4": 0, "ffmpeg_cmd_key": ffmpeg_cmd_key.strip(),
+        })
+        return self._build_play_urls(stream_id)
+    
+    async def create_webcam_ingest(self, stream_id: str) -> tuple[StreamInfo, PublishInfo]:
+        """Create webcam ingest session."""
+        logger.info(f"Creating webcam ingest: stream_id={stream_id}")
+        token = secrets.token_urlsafe(32)
+        expires_at = int(time.time()) + 300
+        stream_info = self._build_play_urls(stream_id)
+        publish_info = PublishInfo(
+            whip_url=f"{self.base_url}/index/api/webrtc?app={self.app}&stream={stream_id}&type=push",
+            token=token, expires_at=expires_at,
+            ice_servers=[{"urls": ["stun:stun.l.google.com:19302"]}]
+        )
+        return stream_info, publish_info
+
+
+    async def delete_stream(self, stream_id: str) -> bool:
+        """Delete stream."""
+        logger.info(f"Deleting stream: stream_id={stream_id}")
+        stream_key = f"{self.vhost}/{self.app}/{stream_id}"
+        
+        try:
+            await self._call_api("/index/api/delStreamProxy", {"key": stream_key})
+            return True
+        except GatewayAPIError:
+            pass
+        
+        try:
+            await self._call_api("/index/api/delFFmpegSource", {"key": stream_key})
+            return True
+        except GatewayAPIError:
+            pass
+        
+        try:
+            await self._call_api("/index/api/close_streams", {
+                "vhost": self.vhost, "app": self.app, "stream": stream_id, "force": 1
+            })
+            return True
+        except GatewayAPIError:
+            return False
+    
+    async def get_snapshot(
+        self, stream_id: str, timeout_sec: float = 2.0, expire_sec: int = 1
+    ) -> Optional[bytes]:
+        """Get snapshot via getSnap API."""
+        url = f"{self.base_url}/index/api/getSnap"
+        params = {
+            "secret": self.secret,
+            "url": f"rtsp://127.0.0.1/{self.app}/{stream_id}",
+            "timeout_sec": timeout_sec, "expire_sec": expire_sec
+        }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url, params=params,
                     timeout=aiohttp.ClientTimeout(total=timeout_sec + 1)
                 ) as resp:
-                    if resp.status == 200 and resp.content_type == "image/jpeg":
+                    if resp.status == 200 and "image/jpeg" in (resp.content_type or ""):
                         return await resp.read()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Snapshot failed: {e}")
         return None
     
     async def get_stream_info(self, stream_id: str) -> Optional[StreamInfo]:
-        """获取流信息"""
+        """Get stream info via getMediaList API."""
         try:
             data = await self._call_api("/index/api/getMediaList", {
-                "vhost": self.vhost,
-                "app": self.app,
-                "stream": stream_id
+                "vhost": self.vhost, "app": self.app, "stream": stream_id
             })
             if data.get("data"):
                 return self._build_play_urls(stream_id)
-        except Exception:
+        except GatewayAPIError:
             pass
         return None
+    
+    async def health_check(self) -> bool:
+        """Health check via getServerConfig API."""
+        try:
+            await self._call_api("/index/api/getServerConfig", {}, timeout=5.0)
+            return True
+        except Exception:
+            return False
 
 
-# 全局网关适配器实例
 _gateway_adapter: Optional[GatewayAdapter] = None
 
 
 def get_gateway_adapter() -> GatewayAdapter:
-    """获取网关适配器（单例）"""
+    """Get gateway adapter (singleton)."""
     global _gateway_adapter
     if _gateway_adapter is None:
         _gateway_adapter = ZLMediaKitAdapter()
     return _gateway_adapter
+
+
+def reset_gateway_adapter() -> None:
+    """Reset gateway adapter (for testing)."""
+    global _gateway_adapter
+    _gateway_adapter = None

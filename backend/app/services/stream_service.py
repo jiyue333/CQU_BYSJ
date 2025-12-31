@@ -21,6 +21,10 @@ from app.schemas.video_stream import (
     VideoStreamCreate,
     VideoStreamStart,
 )
+from app.services.file_storage_service import (
+    FileNotFoundError as FileStorageNotFoundError,
+    get_file_storage_service,
+)
 from app.services.gateway_adapter import (
     GatewayAdapter,
     StreamInfo,
@@ -64,11 +68,13 @@ class StreamService:
         self,
         db: AsyncSession,
         gateway: Optional[GatewayAdapter] = None,
-        inference_control: Optional[InferenceControlService] = None
+        inference_control: Optional[InferenceControlService] = None,
+        file_storage = None
     ):
         self.db = db
         self.gateway = gateway or get_gateway_adapter()
         self.inference_control = inference_control or get_inference_control()
+        self.file_storage = file_storage or get_file_storage_service()
     
     async def get_running_count(self) -> int:
         """获取当前运行中的流数量"""
@@ -211,7 +217,16 @@ class StreamService:
                     rtsp_url=stream.source_url,
                 )
             elif stream.type == StreamType.FILE:
-                file_path = f"{settings.file_storage_path}/{stream.file_id}"
+                # Verify file exists before calling gateway
+                try:
+                    await self.file_storage.get(stream.file_id)
+                except FileStorageNotFoundError:
+                    stream.status = StreamStatus.ERROR
+                    await self.db.flush()
+                    raise GatewayError(f"File {stream.file_id} not found")
+                
+                # Get container-accessible file path
+                file_path = self.file_storage.get_container_path(stream.file_id)
                 stream_info = await self.gateway.create_file_stream(
                     stream_id=stream_id,
                     file_path=file_path,

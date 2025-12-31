@@ -1,3 +1,17 @@
+# Docker Compose 配置文件
+# 人流计数与密度分析系统 - 开发环境
+#
+# 使用方法：
+#   启动所有服务：docker-compose up -d
+#   查看日志：docker-compose logs -f
+#   停止服务：docker-compose down
+#
+# 注意：
+#   1. 首次启动前，请复制 .env.example 为 .env 并修改配置
+#   2. ZLM_SECRET 需要同步到 zlm-config/config.ini 的 [api] secret 字段
+
+services:
+  # PostgreSQL 数据库
   postgres:
     image: postgres:15-alpine
     container_name: crowd-counting-postgres
@@ -40,28 +54,31 @@
     command: redis-server --appendonly yes
 
   # ZLMediaKit 媒体网关
+  # 文档：https://github.com/ZLMediaKit/ZLMediaKit/wiki
   zlmediakit:
     image: zlmediakit/zlmediakit:master
     container_name: crowd-counting-zlmediakit
     restart: unless-stopped
     ports:
-      - "1935:1935"      # RTMP
-      - "8080:80"        # HTTP API / HTTP-FLV / HLS
-      - "8443:443"       # HTTPS
-      - "8554:554"       # RTSP
-      - "10000:10000"    # RTP TCP
-      - "10000:10000/udp" # RTP UDP
-      - "8000:8000/udp"  # WebRTC UDP
-      - "9000:9000/udp"  # SRT
+      - "1935:1935"        # RTMP 推流/拉流
+      - "8080:80"          # HTTP API / HTTP-FLV / HLS 播放
+      - "8443:443"         # HTTPS
+      - "8554:554"         # RTSP 播放
+      - "10000:10000"      # RTP TCP
+      - "10000:10000/udp"  # RTP UDP
+      - "8000:8000/udp"    # WebRTC UDP
+      - "9000:9000/udp"    # SRT
     volumes:
       - ./zlm-config:/opt/media/conf      # 配置文件
       - ./zlm-logs:/opt/media/log         # 日志
       - ./zlm-media:/opt/media/www        # 媒体文件（HLS 切片等）
-      - ./uploads:/data/uploads           # 上传的视频文件
+      - ./uploads:/data/uploads           # 上传的视频文件（与后端共享）
     environment:
       TZ: Asia/Shanghai
     networks:
       - crowd-counting-net
+    depends_on:
+      - redis
 
 networks:
   crowd-counting-net:
