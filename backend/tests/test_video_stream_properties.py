@@ -28,13 +28,15 @@ class TestStreamStatusTransitions:
 
     @given(status=stream_status_strategy)
     @settings(max_examples=100)
-    def test_same_status_transition_always_valid(self, status: StreamStatus):
-        """Property: 相同状态转换总是有效的
+    def test_same_status_transition_not_valid(self, status: StreamStatus):
+        """Property: 相同状态转换不是有效的状态转换
         
-        *For any* 状态 S，从 S 转换到 S 应该总是有效的
+        *For any* 状态 S，从 S 转换到 S 不是有效的状态转换
+        （需要显式在转换矩阵中定义才有效）
         **Validates: Requirements 9.4**
         """
-        assert is_valid_status_transition(status, status) is True
+        # 相同状态转换不在转换矩阵中，所以不是有效转换
+        assert is_valid_status_transition(status, status) is False
 
     @given(from_status=stream_status_strategy, to_status=stream_status_strategy)
     @settings(max_examples=100)
@@ -47,11 +49,6 @@ class TestStreamStatusTransitions:
         应该与 VALID_STATUS_TRANSITIONS 矩阵一致
         **Validates: Requirements 9.4**
         """
-        # 相同状态总是有效
-        if from_status == to_status:
-            assert is_valid_status_transition(from_status, to_status) is True
-            return
-        
         # 检查是否在有效转换矩阵中
         expected_valid = to_status in VALID_STATUS_TRANSITIONS.get(from_status, set())
         actual_valid = is_valid_status_transition(from_status, to_status)
@@ -71,7 +68,7 @@ class TestStreamStatusTransitions:
         """
         assume(from_status == StreamStatus.STARTING)
         
-        valid_targets = {StreamStatus.RUNNING, StreamStatus.ERROR, StreamStatus.STARTING}
+        valid_targets = {StreamStatus.RUNNING, StreamStatus.ERROR}
         
         for target in StreamStatus:
             result = is_valid_status_transition(from_status, target)
@@ -94,7 +91,6 @@ class TestStreamStatusTransitions:
             StreamStatus.STOPPED, 
             StreamStatus.ERROR, 
             StreamStatus.COOLDOWN,
-            StreamStatus.RUNNING  # 相同状态
         }
         
         for target in StreamStatus:
@@ -109,13 +105,13 @@ class TestStreamStatusTransitions:
     def test_terminal_states_can_only_restart(self, from_status: StreamStatus):
         """Property: 终止状态（STOPPED/ERROR/COOLDOWN）只能转换到 STARTING
         
-        *For any* 终止状态，只有 STARTING 是有效的目标状态（除了自身）
+        *For any* 终止状态，只有 STARTING 是有效的目标状态
         **Validates: Requirements 9.4**
         """
         terminal_states = {StreamStatus.STOPPED, StreamStatus.ERROR, StreamStatus.COOLDOWN}
         assume(from_status in terminal_states)
         
-        valid_targets = {StreamStatus.STARTING, from_status}  # 包含自身
+        valid_targets = {StreamStatus.STARTING}
         
         for target in StreamStatus:
             result = is_valid_status_transition(from_status, target)
