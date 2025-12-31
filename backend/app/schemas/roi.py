@@ -85,7 +85,7 @@ class ROIUpdate(BaseModel):
 
 class ROIResponse(ROIBase):
     """ROI 响应 Schema"""
-    id: str = Field(..., alias="roi_id", description="ROI 唯一标识")
+    roi_id: str = Field(..., description="ROI 唯一标识")
     stream_id: str = Field(..., description="关联的视频流 ID")
     created_at: datetime = Field(..., description="创建时间")
     updated_at: datetime = Field(..., description="更新时间")
@@ -99,7 +99,7 @@ class ROIResponse(ROIBase):
     def from_orm_with_conversion(cls, roi) -> "ROIResponse":
         """从 ORM 对象转换，处理 JSON 字段"""
         return cls(
-            id=roi.id,
+            roi_id=roi.id,
             stream_id=roi.stream_id,
             name=roi.name,
             points=[Point(**p) for p in roi.points],
