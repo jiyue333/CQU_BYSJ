@@ -120,3 +120,6 @@ models/
 
 # Alembic
 alembic/versions/*.pyc
+
+# Demo output
+backend/demo_output/
