@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # 数据库配置
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/crowd_counting"
+    database_url: str = "postgresql+asyncpg://crowd_user:crowd_pass_dev@localhost:5432/crowd_counting"
 
     # Redis 配置
     redis_url: str = "redis://localhost:6379/0"

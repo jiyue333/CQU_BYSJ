@@ -2,6 +2,7 @@
 
 from typing import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -14,7 +15,7 @@ engine = create_async_engine(
     pool_pre_ping=True,  # 连接前检查连接是否有效
     pool_size=10,  # 连接池大小
     max_overflow=20,  # 超过 pool_size 后最多创建的连接数
-    pool_recycle=3600,  # 连接回收时间（秒），避免 MySQL "gone away"
+    pool_recycle=3600,  # 连接回收时间（秒），避免数据库超时断开
 )
 
 # 创建异步会话工厂
@@ -61,7 +62,7 @@ async def check_db_connection() -> bool:
     """检查数据库连接是否正常"""
     try:
         async with engine.connect() as conn:
-            await conn.execute("SELECT 1")
+            await conn.execute(text("SELECT 1"))
         return True
     except Exception as e:
         print(f"Database connection failed: {e}")

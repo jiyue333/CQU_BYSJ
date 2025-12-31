@@ -1,6 +1,63 @@
-# 人流计数与密度分析系统 - 后端
+# 后端服务
 
-基于 FastAPI 的后端服务，提供视频流管理、推理结果推送等功能。
+基于 FastAPI 的后端服务。
+
+## 快速开始
+
+```bash
+# 1. 安装依赖
+pip install -e ".[dev]"
+
+# 2. 配置环境变量
+cp .env.example .env
+# 编辑 .env 文件
+
+# 3. 启动依赖服务（使用 Docker Compose）
+cd ..
+docker-compose up -d postgres redis
+
+# 4. 初始化数据库
+alembic upgrade head
+
+# 5. 启动服务
+uvicorn app.main:app --reload
+```
+
+## 开发命令
+
+```bash
+# 启动服务
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# 运行测试
+pytest
+
+# 代码检查
+ruff check .
+ruff format .
+```
+
+## 数据库迁移
+
+```bash
+# 生成迁移
+alembic revision --autogenerate -m "描述"
+
+# 执行迁移
+alembic upgrade head
+
+# 回滚迁移
+alembic downgrade -1
+
+# 查看历史
+alembic history
+```
+
+## API 文档
+
+启动服务后访问：
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
 
 ## 技术栈
 
@@ -9,42 +66,4 @@
 - SQLAlchemy (async)
 - PostgreSQL
 - Redis
-- YOLOv8n (Ultralytics)
-
-## 项目结构
-
-```
-backend/
-├── app/
-│   ├── api/          # API 路由
-│   ├── core/         # 核心配置（数据库、Redis、日志）
-│   ├── models/       # SQLAlchemy 模型
-│   ├── schemas/      # Pydantic Schema
-│   ├── services/     # 业务服务
-│   └── main.py       # 应用入口
-├── tests/            # 测试
-├── pyproject.toml    # 项目配置
-└── .env.example      # 环境变量示例
-```
-
-## 开发
-
-```bash
-# 安装依赖
-pip install -e ".[dev]"
-
-# 复制环境变量
-cp .env.example .env
-
-# 运行开发服务器
-uvicorn app.main:app --reload
-
-# 运行测试
-pytest
-```
-
-## API 文档
-
-启动服务后访问：
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+- YOLOv8n

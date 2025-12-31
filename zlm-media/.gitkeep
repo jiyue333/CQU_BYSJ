@@ -1,0 +1,3 @@
+# ZLMediaKit 媒体文件目录
+# 此目录用于存储 ZLMediaKit 生成的媒体文件（如 HLS 切片）
+# Docker 容器会自动写入媒体文件到此目录

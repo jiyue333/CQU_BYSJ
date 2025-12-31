@@ -1,0 +1,76 @@
+services:
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: crowd-counting-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: crowd_counting
+      POSTGRES_USER: crowd_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crowd_pass_dev}
+      TZ: Asia/Shanghai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - crowd-counting-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crowd_user -d crowd_counting"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis 缓存与消息队列
+  redis:
+    image: redis:7-alpine
+    container_name: crowd-counting-redis
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - crowd-counting-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: redis-server --appendonly yes
+
+  # ZLMediaKit 媒体网关
+  zlmediakit:
+    image: zlmediakit/zlmediakit:master
+    container_name: crowd-counting-zlmediakit
+    restart: unless-stopped
+    ports:
+      - "1935:1935"      # RTMP
+      - "8080:80"        # HTTP API / HTTP-FLV / HLS
+      - "8443:443"       # HTTPS
+      - "8554:554"       # RTSP
+      - "10000:10000"    # RTP TCP
+      - "10000:10000/udp" # RTP UDP
+      - "8000:8000/udp"  # WebRTC UDP
+      - "9000:9000/udp"  # SRT
+    volumes:
+      - ./zlm-config:/opt/media/conf      # 配置文件
+      - ./zlm-logs:/opt/media/log         # 日志
+      - ./zlm-media:/opt/media/www        # 媒体文件（HLS 切片等）
+      - ./uploads:/data/uploads           # 上传的视频文件
+    environment:
+      TZ: Asia/Shanghai
+    networks:
+      - crowd-counting-net
+
+networks:
+  crowd-counting-net:
+    driver: bridge
+
+volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local

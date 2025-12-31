@@ -14,12 +14,36 @@ from app.core.logging import setup_logging
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """应用生命周期管理"""
     setup_logging()
-    # TODO: 初始化数据库连接池
-    # TODO: 初始化 Redis 连接
+    
+    # 初始化数据库连接池
+    from app.core.database import check_db_connection, close_db, init_db
+    print("Initializing database...")
+    await init_db()
+    print("Checking database connection...")
+    if not await check_db_connection():
+        raise RuntimeError("Database connection failed")
+    
+    # 初始化 Redis 连接
+    from app.core.redis import check_redis_connection, close_redis, init_redis
+    print("Initializing Redis...")
+    await init_redis()
+    print("Checking Redis connection...")
+    if not await check_redis_connection():
+        raise RuntimeError("Redis connection failed")
+    
     # TODO: 启动 Redis Streams 监听（检测结果与状态上报）
     # TODO: 启动 Redis PubSub 监听（控制指令）
+    
+    print("Application startup complete")
+    
     yield
-    # TODO: 清理资源
+    
+    # 清理资源
+    print("Closing database connections...")
+    await close_db()
+    print("Closing Redis connections...")
+    await close_redis()
+    print("Application shutdown complete")
 
 
 app = FastAPI(

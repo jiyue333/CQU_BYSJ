@@ -25,6 +25,11 @@ async def get_redis() -> redis.Redis:
     return _redis_client
 
 
+async def init_redis() -> None:
+    """初始化 Redis 连接"""
+    await get_redis()
+
+
 async def close_redis() -> None:
     """关闭 Redis 连接"""
     global _redis_client

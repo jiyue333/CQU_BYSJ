@@ -91,12 +91,14 @@ Thumbs.db
 docker-compose.override.yml
 
 # ZLMediaKit
-zlm-config/
-zlm-logs/
-zlm-media/
+zlm-logs/*
+!zlm-logs/.gitkeep
+zlm-media/*
+!zlm-media/.gitkeep
 
 # Uploads
-uploads/
+uploads/*
+!uploads/.gitkeep
 /data/
 
 # Database
