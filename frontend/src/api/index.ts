@@ -17,3 +17,16 @@ export {
   type ROIListResponse
 } from './rois'
 export { uploadFile, listFiles, getFile, deleteFile } from './files'
+export {
+  getHistory,
+  getAggregatedHistory,
+  exportHistory,
+  downloadHistory,
+  type AggregationGranularity,
+  type HistoryStatResponse,
+  type HistoryListResponse,
+  type AggregatedStat,
+  type AggregatedHistoryResponse,
+  type HistoryQueryParams,
+  type AggregatedQueryParams
+} from './history'

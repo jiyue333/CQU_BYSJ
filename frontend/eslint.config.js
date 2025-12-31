@@ -44,6 +44,11 @@ export default [
         HTMLDivElement: 'readonly',
         RTCPeerConnection: 'readonly',
         Event: 'readonly',
+        MouseEvent: 'readonly',
+        KeyboardEvent: 'readonly',
+        CanvasRenderingContext2D: 'readonly',
+        performance: 'readonly',
+        requestAnimationFrame: 'readonly',
       },
     },
     plugins: {
@@ -90,6 +95,11 @@ export default [
         HTMLDivElement: 'readonly',
         RTCPeerConnection: 'readonly',
         Event: 'readonly',
+        MouseEvent: 'readonly',
+        KeyboardEvent: 'readonly',
+        CanvasRenderingContext2D: 'readonly',
+        performance: 'readonly',
+        requestAnimationFrame: 'readonly',
       },
     },
     rules: {

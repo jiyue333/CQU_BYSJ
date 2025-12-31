@@ -40,6 +40,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await result_push_service.start()
     await status_push_service.start()
     
+    # 启动历史数据存储服务
+    from app.services.history_storage_service import get_history_storage_service
+    print("Starting history storage service...")
+    history_storage_service = get_history_storage_service()
+    await history_storage_service.start()
+    
     print("Application startup complete")
     
     yield
@@ -48,6 +54,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     print("Stopping WebSocket push services...")
     await result_push_service.stop()
     await status_push_service.stop()
+    
+    # 停止历史数据存储服务
+    print("Stopping history storage service...")
+    await history_storage_service.stop()
     
     # 清理资源
     print("Closing database connections...")
@@ -81,12 +91,12 @@ async def health_check() -> dict[str, str]:
 
 
 # 注册路由
-from app.api import files, rois, streams, websockets
+from app.api import files, rois, streams, websockets, history
 app.include_router(streams.router, prefix="/api/streams", tags=["streams"])
 app.include_router(rois.router, prefix="/api/streams", tags=["rois"])
+app.include_router(history.router, prefix="/api/streams", tags=["history"])
 app.include_router(files.router, prefix="/api/files", tags=["files"])
 app.include_router(websockets.router, prefix="/ws", tags=["websockets"])
 # TODO: 注册其他路由
-# from app.api import config, history
+# from app.api import config
 # app.include_router(config.router, prefix="/api/config", tags=["config"])
-# app.include_router(history.router, prefix="/api", tags=["history"])
