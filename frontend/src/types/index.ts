@@ -136,3 +136,21 @@ export interface StreamStatusUpdate {
 export interface ApiError {
   detail: string
 }
+
+// 系统配置
+export interface SystemConfig {
+  id: number
+  stream_id: string
+  confidence_threshold: number
+  inference_fps: number
+  heatmap_grid_size: number
+  heatmap_decay: number
+}
+
+// 系统配置更新请求
+export interface SystemConfigUpdate {
+  confidence_threshold?: number
+  inference_fps?: number
+  heatmap_grid_size?: number
+  heatmap_decay?: number
+}

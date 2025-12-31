@@ -15,6 +15,9 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.logging import get_logger, log_error, log_info
+
+logger = get_logger(__name__)
 from app.schemas.history_stat import (
     AggregatedHistoryResponse,
     AggregationGranularity,
@@ -137,11 +140,14 @@ async def export_history(
     
     支持 CSV 和 Excel 格式导出。
     """
+    log_info(logger, "Exporting history", stream_id=stream_id, format=format)
+    
     # 验证流是否存在
     stream_service = get_stream_service(db)
     try:
         await stream_service.get_or_raise(stream_id)
     except StreamNotFoundError:
+        log_error(logger, "Stream not found for export", stream_id=stream_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Stream {stream_id} not found"
@@ -164,6 +170,8 @@ async def export_history(
         limit=10000,  # 最大导出 10000 条
         offset=0,
     )
+    
+    log_info(logger, "History export completed", stream_id=stream_id, record_count=result.total)
     
     if format == "csv":
         return _export_csv(stream_id, result)

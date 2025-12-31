@@ -2,7 +2,8 @@
 /**
  * 视频播放器组件
  * 协议优先级：WebRTC → HTTP-FLV → HLS
- * Requirements: 1.1, 1.2, 1.3
+ * 包含连接状态和处理状态指示
+ * Requirements: 1.1, 1.2, 1.3, 9.2, 9.4
  */
 
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
@@ -12,6 +13,7 @@ import Hls from 'hls.js'
 const props = defineProps<{
   playUrl: string | null
   streamId: string
+  status?: string
 }>()
 
 const emit = defineEmits<{
@@ -26,6 +28,7 @@ const currentProtocol = ref<Protocol>('none')
 const isPlaying = ref(false)
 const errorMessage = ref('')
 const videoRef = ref<HTMLVideoElement | null>(null)
+const isBuffering = ref(false)
 
 // 播放器实例
 let flvPlayer: flvjs.Player | null = null
@@ -116,7 +119,25 @@ function cleanup() {
   }
 
   isPlaying.value = false
+  isBuffering.value = false
   currentProtocol.value = 'none'
+}
+
+// 监听视频缓冲状态
+function setupBufferingListeners() {
+  if (!videoRef.value) return
+  
+  videoRef.value.addEventListener('waiting', () => {
+    isBuffering.value = true
+  })
+  
+  videoRef.value.addEventListener('playing', () => {
+    isBuffering.value = false
+  })
+  
+  videoRef.value.addEventListener('canplay', () => {
+    isBuffering.value = false
+  })
 }
 
 // 尝试 HTTP-FLV 播放
@@ -355,6 +376,7 @@ watch(
 
 // 组件挂载时开始播放
 onMounted(() => {
+  setupBufferingListeners()
   if (props.playUrl) {
     startPlayback()
   }
@@ -369,7 +391,8 @@ onUnmounted(() => {
 defineExpose({
   videoElement: videoRef,
   currentProtocol,
-  isPlaying
+  isPlaying,
+  isBuffering
 })
 </script>
 
@@ -386,6 +409,17 @@ defineExpose({
     <!-- 协议指示器 -->
     <div v-if="currentProtocol !== 'none'" class="protocol-badge">
       {{ currentProtocol.toUpperCase() }}
+    </div>
+
+    <!-- 状态指示器 -->
+    <div v-if="status" class="status-badge" :class="status">
+      {{ status === 'running' ? '运行中' : status === 'starting' ? '启动中' : status === 'cooldown' ? '冷却中' : status === 'error' ? '错误' : '已停止' }}
+    </div>
+
+    <!-- 缓冲指示器 -->
+    <div v-if="isBuffering && isPlaying" class="buffering-indicator">
+      <div class="buffering-spinner"></div>
+      <span>缓冲中...</span>
     </div>
 
     <!-- 加载状态 -->
@@ -434,6 +468,62 @@ defineExpose({
   font-size: 12px;
   font-weight: 500;
   border-radius: 4px;
+}
+
+.status-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.7);
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 4px;
+}
+
+.status-badge.running {
+  color: #4caf50;
+}
+
+.status-badge.starting {
+  color: #ff9800;
+}
+
+.status-badge.cooldown {
+  color: #2196f3;
+}
+
+.status-badge.error {
+  color: #f44336;
+}
+
+.status-badge.stopped {
+  color: #9e9e9e;
+}
+
+.buffering-indicator {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 12px;
+}
+
+.buffering-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid #333;
+  border-top-color: #4a9eff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
 }
 
 .loading-overlay,

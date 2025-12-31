@@ -14,6 +14,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.logging import get_logger, log_error, log_info
+
+logger = get_logger(__name__)
 from app.models.roi import ROI
 from app.models.video_stream import VideoStream
 from app.schemas.roi import (
@@ -81,6 +84,8 @@ async def create_roi(
     # 验证视频流存在
     await _get_stream_or_404(db, stream_id)
     
+    log_info(logger, "Creating ROI", stream_id=stream_id, roi_name=data.name)
+    
     # 创建 ROI
     roi = ROI(
         id=str(uuid.uuid4()),
@@ -98,6 +103,7 @@ async def create_roi(
     await db.commit()
     await db.refresh(roi)
     
+    log_info(logger, "ROI created", stream_id=stream_id, roi_id=roi.id)
     return _roi_to_response(roi)
 
 
@@ -174,6 +180,8 @@ async def update_roi(
     """
     roi = await _get_roi_or_404(db, stream_id, roi_id)
     
+    log_info(logger, "Updating ROI", stream_id=stream_id, roi_id=roi_id)
+    
     # 部分更新
     if data.name is not None:
         roi.name = data.name
@@ -191,6 +199,7 @@ async def update_roi(
     await db.commit()
     await db.refresh(roi)
     
+    log_info(logger, "ROI updated", stream_id=stream_id, roi_id=roi_id)
     return _roi_to_response(roi)
 
 
@@ -213,5 +222,9 @@ async def delete_roi(
     """
     roi = await _get_roi_or_404(db, stream_id, roi_id)
     
+    log_info(logger, "Deleting ROI", stream_id=stream_id, roi_id=roi_id)
+    
     await db.delete(roi)
     await db.commit()
+    
+    log_info(logger, "ROI deleted", stream_id=stream_id, roi_id=roi_id)

@@ -8,6 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.logging import get_logger, log_error, log_info
+
+logger = get_logger(__name__)
 from app.schemas.file import FileInfoPublic, FileListResponse, FileUploadResponse
 from app.services.file_storage_service import (
     FileNotFoundError,
@@ -47,19 +50,25 @@ async def upload_file(
     The file will be stored and can be used to create a video stream.
     Use the returned file_id when calling POST /api/streams with type='file'.
     """
+    log_info(logger, "Uploading file", filename=file.filename)
     try:
-        return await storage.upload(file)
+        result = await storage.upload(file)
+        log_info(logger, "File uploaded", file_id=result.file_id, filename=file.filename)
+        return result
     except InvalidFileTypeError as e:
+        log_error(logger, "Invalid file type", filename=file.filename, error=e)
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail=str(e)
         )
     except FileTooLargeError as e:
+        log_error(logger, "File too large", filename=file.filename, error=e)
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=str(e)
         )
     except FileStorageError as e:
+        log_error(logger, "File storage error", filename=file.filename, error=e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
@@ -117,10 +126,13 @@ async def delete_file(
     
     Note: If a stream is using this file, it will enter ERROR state.
     """
+    log_info(logger, "Deleting file", file_id=file_id)
     try:
         await storage.get(file_id)  # Check if exists
         await storage.delete(file_id)
+        log_info(logger, "File deleted", file_id=file_id)
     except FileNotFoundError:
+        log_error(logger, "File not found for delete", file_id=file_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"File {file_id} not found"
@@ -139,5 +151,7 @@ async def cleanup_files(
     
     This is normally done automatically, but can be triggered manually.
     """
+    log_info(logger, "Starting file cleanup")
     deleted_count = await storage.cleanup_expired()
+    log_info(logger, "File cleanup completed", deleted_count=deleted_count)
     return {"deleted_count": deleted_count}

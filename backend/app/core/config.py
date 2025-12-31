@@ -68,5 +68,15 @@ class Settings(BaseSettings):
     snap_backoff_base: float = 1.0
     snap_backoff_max: float = 30.0
 
+    # 重连配置
+    reconnect_max_attempts: int = 5  # 最大重连次数
+    reconnect_base_delay: float = 1.0  # 重连基础延迟（秒）
+    reconnect_max_delay: float = 30.0  # 最大重连延迟（秒）
+    reconnect_jitter: float = 0.2  # 重连抖动因子 (±20%)
+
+    # 日志配置
+    log_level: str = "INFO"
+    log_format: str = "json"  # json 或 console
+
 
 settings = Settings()

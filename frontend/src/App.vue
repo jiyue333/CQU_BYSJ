@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
  * 主应用组件
- * 集成视频源选择、播放器、热力图叠加、实时统计面板
- * Requirements: 5.1, 5.2, 5.3, 7.1, 9.4
+ * 集成视频源选择、播放器、热力图叠加、实时统计面板、配置管理、错误通知
+ * Requirements: 5.1, 5.2, 5.3, 7.1, 8.1, 8.2, 8.3, 9.2, 9.4
  */
 
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
@@ -10,6 +10,9 @@ import VideoSourceSelector from './components/VideoSourceSelector.vue'
 import VideoPlayer from './components/VideoPlayer.vue'
 import HeatmapOverlay from './components/HeatmapOverlay.vue'
 import StatsPanel from './components/StatsPanel.vue'
+import ConfigPanel from './components/ConfigPanel.vue'
+import ErrorNotification from './components/ErrorNotification.vue'
+import ConnectionIndicator from './components/ConnectionIndicator.vue'
 import { useStreamsStore } from './stores/streams'
 import type { VideoStream, StreamStatus, DetectionResult } from './types'
 
@@ -45,6 +48,19 @@ const heatmapGrid = computed(() => {
   return currentResult.value?.heatmap_grid || null
 })
 
+// 连接状态
+const connectionState = computed(() => ({
+  websocket: store.wsConnected,
+  streamStatus: selectedStream.value?.status,
+  reconnecting: selectedStreamId.value 
+    ? store.getReconnectionState(selectedStreamId.value)?.isReconnecting 
+    : false,
+  reconnectAttempt: selectedStreamId.value 
+    ? store.getReconnectionState(selectedStreamId.value)?.attemptCount 
+    : 0,
+  maxAttempts: 5
+}))
+
 // 统计信息
 const runningCount = computed(() => 
   store.streamList.filter(s => s.status === 'running').length
@@ -59,6 +75,12 @@ function onStreamCreated(streamId: string) {
 // 处理错误
 function onError(message: string) {
   console.error('Error:', message)
+  store.showError(message)
+}
+
+// 处理通知关闭
+function onDismissNotification(id: number) {
+  store.removeNotification(id)
 }
 
 // 启动流
@@ -247,6 +269,12 @@ function canStop(status: StreamStatus): boolean {
 
 <template>
   <div class="app">
+    <!-- 错误通知 -->
+    <ErrorNotification 
+      :notifications="store.notifications" 
+      @dismiss="onDismissNotification" 
+    />
+
     <!-- 侧边栏 -->
     <aside class="sidebar">
       <!-- 视频源选择器 -->
@@ -263,10 +291,7 @@ function canStop(status: StreamStatus): boolean {
         </div>
 
         <!-- WebSocket 连接状态 -->
-        <div class="connection-status" :class="{ connected: store.wsConnected }">
-          <span class="status-dot"></span>
-          <span>{{ store.wsConnected ? '已连接' : '未连接' }}</span>
-        </div>
+        <ConnectionIndicator :state="connectionState" />
 
         <div v-if="store.loading" class="loading">
           <span class="spinner"></span>
@@ -331,6 +356,12 @@ function canStop(status: StreamStatus): boolean {
           </li>
         </ul>
       </div>
+
+      <!-- 配置管理面板 -->
+      <ConfigPanel
+        :stream-id="selectedStreamId"
+        @error="onError"
+      />
     </aside>
 
     <!-- 主内容区 -->
@@ -342,6 +373,7 @@ function canStop(status: StreamStatus): boolean {
             <VideoPlayer
               :play-url="selectedStream.play_url"
               :stream-id="selectedStream.stream_id"
+              :status="selectedStream.status"
             />
             <HeatmapOverlay
               :heatmap-grid="heatmapGrid"
@@ -477,37 +509,6 @@ function canStop(status: StreamStatus): boolean {
 .stat-badge.total {
   background: rgba(158, 158, 158, 0.2);
   color: #9e9e9e;
-}
-
-/* 连接状态 */
-.connection-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  background: rgba(244, 67, 54, 0.1);
-  border-radius: 6px;
-  font-size: 12px;
-  color: #f44336;
-  margin-bottom: 12px;
-}
-
-.connection-status.connected {
-  background: rgba(76, 175, 80, 0.1);
-  color: #4caf50;
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: currentColor;
-  animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
 }
 
 .stream-items {

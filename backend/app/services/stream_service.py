@@ -6,6 +6,7 @@ StreamService 负责：
 - 并发限制检查
 - 与媒体网关交互
 - 与推理服务交互
+- 自动重连管理
 """
 
 import uuid
@@ -13,6 +14,7 @@ from typing import Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+import structlog
 
 from app.core.config import settings
 from app.models.video_stream import StreamStatus, StreamType, VideoStream
@@ -34,6 +36,8 @@ from app.services.inference_control import (
     InferenceControlService,
     get_inference_control,
 )
+
+logger = structlog.get_logger(__name__)
 
 
 class StreamServiceError(Exception):
@@ -123,6 +127,13 @@ class StreamService:
         await self.db.flush()
         await self.db.refresh(stream)
         
+        logger.info(
+            "stream_created",
+            stream_id=stream_id,
+            name=data.name,
+            type=data.type.value
+        )
+        
         return stream
     
     async def get(self, stream_id: str) -> Optional[VideoStream]:
@@ -151,9 +162,6 @@ class StreamService:
         
         如果流正在运行，先停止再删除。
         """
-        import logging
-        logger = logging.getLogger(__name__)
-        
         stream = await self.get_or_raise(stream_id)
         
         # 如果正在运行，先停止
@@ -164,11 +172,17 @@ class StreamService:
         try:
             await self.gateway.delete_stream(stream_id)
         except Exception as e:
-            logger.warning(f"Failed to delete stream from gateway during delete: {e}")
+            logger.warning(
+                "gateway_delete_failed_during_delete",
+                stream_id=stream_id,
+                error=str(e)
+            )
         
         # 删除数据库记录
         await self.db.delete(stream)
         await self.db.flush()
+        
+        logger.info("stream_deleted", stream_id=stream_id)
         
         return True
 
@@ -211,6 +225,13 @@ class StreamService:
         stream.status = StreamStatus.STARTING
         await self.db.flush()
         
+        logger.info(
+            "stream_starting",
+            stream_id=stream_id,
+            type=stream.type.value,
+            enable_infer=options.enable_infer
+        )
+        
         publish_info: Optional[PublishInfo] = None
         
         gateway_created = False
@@ -231,6 +252,11 @@ class StreamService:
                 except FileStorageNotFoundError:
                     stream.status = StreamStatus.ERROR
                     await self.db.flush()
+                    logger.error(
+                        "file_not_found",
+                        stream_id=stream_id,
+                        file_id=stream.file_id
+                    )
                     raise GatewayError(f"File {stream.file_id} not found")
                 
                 # Get container-accessible file path
@@ -262,9 +288,11 @@ class StreamService:
                     )
                 except Exception as infer_err:
                     # 推理服务启动失败，回滚网关资源
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.warning(f"Inference start failed, rolling back gateway: {infer_err}")
+                    logger.error(
+                        "inference_start_failed",
+                        stream_id=stream_id,
+                        error=str(infer_err)
+                    )
                     if gateway_created:
                         try:
                             await self.gateway.delete_stream(stream_id)
@@ -275,10 +303,21 @@ class StreamService:
                     await self.db.flush()
                     raise GatewayError(f"Failed to start inference: {infer_err}") from infer_err
             
+            logger.info(
+                "stream_started",
+                stream_id=stream_id,
+                play_url=stream.play_url
+            )
+            
         except GatewayError:
             raise
         except Exception as e:
             # 网关错误，更新状态为 ERROR，并清理已创建的网关资源
+            logger.error(
+                "stream_start_failed",
+                stream_id=stream_id,
+                error=str(e)
+            )
             if gateway_created:
                 try:
                     await self.gateway.delete_stream(stream_id)
@@ -320,9 +359,6 @@ class StreamService:
             StreamNotFoundError: 流不存在
             InvalidStateTransitionError: 无效状态转换
         """
-        import logging
-        logger = logging.getLogger(__name__)
-        
         stream = await self.get_or_raise(stream_id)
         
         # 检查状态转换是否有效
@@ -331,25 +367,83 @@ class StreamService:
                 f"Cannot stop stream in {stream.status} status"
             )
         
+        logger.info("stream_stopping", stream_id=stream_id)
+        
         # 发送 STOP 指令（无论 enable_infer 设置，强制停止推理）
         # Best effort - don't fail if inference control fails
         try:
             await self.inference_control.send_stop(stream_id=stream_id)
         except Exception as e:
-            logger.warning(f"Failed to send stop to inference control: {e}")
+            logger.warning(
+                "inference_stop_failed",
+                stream_id=stream_id,
+                error=str(e)
+            )
         
         # 删除网关中的流
         # Best effort - don't fail if gateway fails
         try:
             await self.gateway.delete_stream(stream_id)
         except Exception as e:
-            logger.warning(f"Failed to delete stream from gateway: {e}")
+            logger.warning(
+                "gateway_delete_failed",
+                stream_id=stream_id,
+                error=str(e)
+            )
         
         # 更新状态为 STOPPED (always update DB state)
         stream.status = StreamStatus.STOPPED
         stream.play_url = None
         await self.db.flush()
         await self.db.refresh(stream)
+        
+        logger.info("stream_stopped", stream_id=stream_id)
+        
+        return stream
+    
+    async def set_cooldown(self, stream_id: str) -> VideoStream:
+        """将流设置为冷却状态
+        
+        Args:
+            stream_id: 视频流 ID
+            
+        Returns:
+            更新后的视频流
+        """
+        stream = await self.get_or_raise(stream_id)
+        
+        if stream.can_transition_to(StreamStatus.COOLDOWN):
+            stream.status = StreamStatus.COOLDOWN
+            await self.db.flush()
+            await self.db.refresh(stream)
+            
+            logger.info("stream_cooldown", stream_id=stream_id)
+        
+        return stream
+    
+    async def set_error(self, stream_id: str, error_message: Optional[str] = None) -> VideoStream:
+        """将流设置为错误状态
+        
+        Args:
+            stream_id: 视频流 ID
+            error_message: 错误信息
+            
+        Returns:
+            更新后的视频流
+        """
+        stream = await self.get_or_raise(stream_id)
+        
+        if stream.can_transition_to(StreamStatus.ERROR):
+            stream.status = StreamStatus.ERROR
+            stream.play_url = None
+            await self.db.flush()
+            await self.db.refresh(stream)
+            
+            logger.error(
+                "stream_error",
+                stream_id=stream_id,
+                error=error_message
+            )
         
         return stream
     

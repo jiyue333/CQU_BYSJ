@@ -1,7 +1,7 @@
 /**
  * WebSocket 服务
  * 支持自动重连（指数退避）和断点续传
- * Requirements: 5.3, 9.1
+ * Requirements: 5.3, 9.1, 9.2
  */
 
 import type { DetectionResult, StreamStatusUpdate, WsMessage } from '@/types'
@@ -10,6 +10,7 @@ import type { DetectionResult, StreamStatusUpdate, WsMessage } from '@/types'
 const RECONNECT_BASE_DELAY = 1000 // 1s
 const RECONNECT_MAX_DELAY = 30000 // 30s
 const RECONNECT_JITTER = 0.2 // ±20% jitter
+const RECONNECT_MAX_ATTEMPTS = 5 // 最大重连次数
 const HEARTBEAT_INTERVAL = 30000 // 30s
 
 // Calculate backoff with jitter
@@ -26,6 +27,8 @@ function calculateBackoff(attempts: number): number {
 type ResultCallback = (result: DetectionResult) => void
 type StatusCallback = (status: StreamStatusUpdate) => void
 type ConnectionCallback = (connected: boolean) => void
+type ReconnectCallback = (attempt: number, maxAttempts: number, delay: number) => void
+type ErrorCallback = (error: string) => void
 
 /**
  * 检测结果 WebSocket 服务
@@ -41,6 +44,8 @@ export class ResultWebSocket {
 
   private onResult: ResultCallback | null = null
   private onConnection: ConnectionCallback | null = null
+  private onReconnect: ReconnectCallback | null = null
+  private onError: ErrorCallback | null = null
 
   constructor(streamId: string) {
     this.streamId = streamId
@@ -51,11 +56,16 @@ export class ResultWebSocket {
    */
   connect(
     onResult: ResultCallback,
-    onConnection?: ConnectionCallback
+    onConnection?: ConnectionCallback,
+    onReconnect?: ReconnectCallback,
+    onError?: ErrorCallback
   ): void {
     this.onResult = onResult
     this.onConnection = onConnection || null
+    this.onReconnect = onReconnect || null
+    this.onError = onError || null
     this.isManualClose = false
+    this.reconnectAttempts = 0
     this.doConnect()
   }
 
@@ -64,7 +74,14 @@ export class ResultWebSocket {
     const host = window.location.host
     const url = `${protocol}//${host}/ws/result/${this.streamId}`
 
-    this.ws = new WebSocket(url)
+    try {
+      this.ws = new WebSocket(url)
+    } catch (err) {
+      console.error('WebSocket creation failed:', err)
+      this.onError?.(`WebSocket 创建失败: ${err}`)
+      this.scheduleReconnect()
+      return
+    }
 
     this.ws.onopen = () => {
       this.reconnectAttempts = 0
@@ -86,17 +103,22 @@ export class ResultWebSocket {
       }
     }
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (event) => {
       this.stopHeartbeat()
       this.onConnection?.(false)
 
       if (!this.isManualClose) {
+        // 非正常关闭，记录原因
+        if (event.code !== 1000) {
+          console.warn(`WebSocket closed abnormally: code=${event.code}, reason=${event.reason}`)
+        }
         this.scheduleReconnect()
       }
     }
 
     this.ws.onerror = (error) => {
       console.error('WebSocket error:', error)
+      this.onError?.('WebSocket 连接错误')
     }
   }
 
@@ -147,6 +169,13 @@ export class ResultWebSocket {
       clearTimeout(this.reconnectTimer)
     }
 
+    // 检查是否超过最大重连次数
+    if (this.reconnectAttempts >= RECONNECT_MAX_ATTEMPTS) {
+      console.error(`Max reconnection attempts (${RECONNECT_MAX_ATTEMPTS}) reached`)
+      this.onError?.(`重连失败：已达到最大重试次数 (${RECONNECT_MAX_ATTEMPTS})`)
+      return
+    }
+
     // Check if browser is online
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       console.log('Browser is offline, waiting for online event...')
@@ -161,7 +190,10 @@ export class ResultWebSocket {
     // Exponential backoff with jitter
     const delay = calculateBackoff(this.reconnectAttempts)
 
-    console.log(`Reconnecting in ${Math.round(delay)}ms (attempt ${this.reconnectAttempts + 1})`)
+    console.log(`Reconnecting in ${Math.round(delay)}ms (attempt ${this.reconnectAttempts + 1}/${RECONNECT_MAX_ATTEMPTS})`)
+    
+    // 通知重连状态
+    this.onReconnect?.(this.reconnectAttempts + 1, RECONNECT_MAX_ATTEMPTS, delay)
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectAttempts++
@@ -194,6 +226,13 @@ export class ResultWebSocket {
   get isConnected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN
   }
+
+  /**
+   * 获取当前重连次数
+   */
+  get currentReconnectAttempts(): number {
+    return this.reconnectAttempts
+  }
 }
 
 /**
@@ -208,17 +247,24 @@ export class StatusWebSocket {
 
   private onStatus: StatusCallback | null = null
   private onConnection: ConnectionCallback | null = null
+  private onReconnect: ReconnectCallback | null = null
+  private onError: ErrorCallback | null = null
 
   /**
    * 连接 WebSocket
    */
   connect(
     onStatus: StatusCallback,
-    onConnection?: ConnectionCallback
+    onConnection?: ConnectionCallback,
+    onReconnect?: ReconnectCallback,
+    onError?: ErrorCallback
   ): void {
     this.onStatus = onStatus
     this.onConnection = onConnection || null
+    this.onReconnect = onReconnect || null
+    this.onError = onError || null
     this.isManualClose = false
+    this.reconnectAttempts = 0
     this.doConnect()
   }
 
@@ -227,7 +273,14 @@ export class StatusWebSocket {
     const host = window.location.host
     const url = `${protocol}//${host}/ws/status`
 
-    this.ws = new WebSocket(url)
+    try {
+      this.ws = new WebSocket(url)
+    } catch (err) {
+      console.error('WebSocket creation failed:', err)
+      this.onError?.(`WebSocket 创建失败: ${err}`)
+      this.scheduleReconnect()
+      return
+    }
 
     this.ws.onopen = () => {
       this.reconnectAttempts = 0
@@ -244,17 +297,21 @@ export class StatusWebSocket {
       }
     }
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (event) => {
       this.stopHeartbeat()
       this.onConnection?.(false)
 
       if (!this.isManualClose) {
+        if (event.code !== 1000) {
+          console.warn(`WebSocket closed abnormally: code=${event.code}, reason=${event.reason}`)
+        }
         this.scheduleReconnect()
       }
     }
 
     this.ws.onerror = (error) => {
       console.error('WebSocket error:', error)
+      this.onError?.('WebSocket 连接错误')
     }
   }
 
@@ -296,6 +353,13 @@ export class StatusWebSocket {
       clearTimeout(this.reconnectTimer)
     }
 
+    // 检查是否超过最大重连次数
+    if (this.reconnectAttempts >= RECONNECT_MAX_ATTEMPTS) {
+      console.error(`Max reconnection attempts (${RECONNECT_MAX_ATTEMPTS}) reached`)
+      this.onError?.(`重连失败：已达到最大重试次数 (${RECONNECT_MAX_ATTEMPTS})`)
+      return
+    }
+
     // Check if browser is online
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       console.log('Browser is offline, waiting for online event...')
@@ -310,7 +374,10 @@ export class StatusWebSocket {
     // Exponential backoff with jitter
     const delay = calculateBackoff(this.reconnectAttempts)
 
-    console.log(`Reconnecting in ${Math.round(delay)}ms (attempt ${this.reconnectAttempts + 1})`)
+    console.log(`Reconnecting in ${Math.round(delay)}ms (attempt ${this.reconnectAttempts + 1}/${RECONNECT_MAX_ATTEMPTS})`)
+    
+    // 通知重连状态
+    this.onReconnect?.(this.reconnectAttempts + 1, RECONNECT_MAX_ATTEMPTS, delay)
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectAttempts++
@@ -339,5 +406,12 @@ export class StatusWebSocket {
 
   get isConnected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN
+  }
+
+  /**
+   * 获取当前重连次数
+   */
+  get currentReconnectAttempts(): number {
+    return this.reconnectAttempts
   }
 }

@@ -182,8 +182,10 @@ function drawChart() {
   const step = Math.floor(data.length / xLabelCount)
   
   for (let i = 0; i < data.length; i += step) {
+    const item = data[i]
+    if (!item) continue
     const x = padding.left + (chartWidth * i) / (data.length - 1 || 1)
-    const date = new Date(data[i].timestamp)
+    const date = new Date(item.timestamp)
     const label = formatTimeLabel(date)
     
     ctx.fillText(label, x, height - padding.bottom + 20)

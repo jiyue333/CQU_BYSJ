@@ -1,13 +1,22 @@
-"""FastAPI 应用入口"""
+"""FastAPI 应用入口
+
+提供应用生命周期管理和路由注册。
+使用结构化日志记录应用状态。
+
+Requirements: 9.3
+"""
 
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import structlog
 
 from app.core.config import settings
-from app.core.logging import setup_logging
+from app.core.logging import setup_logging, bind_context
+
+logger = structlog.get_logger(__name__)
 
 
 @asynccontextmanager
@@ -15,56 +24,67 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """应用生命周期管理"""
     setup_logging()
     
+    logger.info("application_starting", app_name=settings.app_name)
+    
     # 初始化数据库连接池
     from app.core.database import check_db_connection, close_db, init_db
-    print("Initializing database...")
+    logger.info("initializing_database")
     await init_db()
-    print("Checking database connection...")
+    logger.info("checking_database_connection")
     if not await check_db_connection():
+        logger.error("database_connection_failed")
         raise RuntimeError("Database connection failed")
+    logger.info("database_connected")
     
     # 初始化 Redis 连接
     from app.core.redis import check_redis_connection, close_redis, init_redis
-    print("Initializing Redis...")
+    logger.info("initializing_redis")
     await init_redis()
-    print("Checking Redis connection...")
+    logger.info("checking_redis_connection")
     if not await check_redis_connection():
+        logger.error("redis_connection_failed")
         raise RuntimeError("Redis connection failed")
+    logger.info("redis_connected")
     
     # 启动 WebSocket 推送服务
     from app.services.result_push_service import get_result_push_service
     from app.services.status_push_service import get_status_push_service
-    print("Starting WebSocket push services...")
+    logger.info("starting_websocket_push_services")
     result_push_service = get_result_push_service()
     status_push_service = get_status_push_service()
     await result_push_service.start()
     await status_push_service.start()
+    logger.info("websocket_push_services_started")
     
     # 启动历史数据存储服务
     from app.services.history_storage_service import get_history_storage_service
-    print("Starting history storage service...")
+    logger.info("starting_history_storage_service")
     history_storage_service = get_history_storage_service()
     await history_storage_service.start()
+    logger.info("history_storage_service_started")
     
-    print("Application startup complete")
+    logger.info("application_startup_complete")
     
     yield
     
+    logger.info("application_shutting_down")
+    
     # 停止 WebSocket 推送服务
-    print("Stopping WebSocket push services...")
+    logger.info("stopping_websocket_push_services")
     await result_push_service.stop()
     await status_push_service.stop()
     
     # 停止历史数据存储服务
-    print("Stopping history storage service...")
+    logger.info("stopping_history_storage_service")
     await history_storage_service.stop()
     
     # 清理资源
-    print("Closing database connections...")
+    logger.info("closing_database_connections")
     await close_db()
-    print("Closing Redis connections...")
+    logger.info("closing_redis_connections")
     await close_redis()
-    print("Application shutdown complete")
+    
+    logger.info("application_shutdown_complete")
 
 
 app = FastAPI(
@@ -91,12 +111,10 @@ async def health_check() -> dict[str, str]:
 
 
 # 注册路由
-from app.api import files, rois, streams, websockets, history
+from app.api import config, files, history, rois, streams, websockets
 app.include_router(streams.router, prefix="/api/streams", tags=["streams"])
 app.include_router(rois.router, prefix="/api/streams", tags=["rois"])
 app.include_router(history.router, prefix="/api/streams", tags=["history"])
 app.include_router(files.router, prefix="/api/files", tags=["files"])
+app.include_router(config.router, prefix="/api/config", tags=["config"])
 app.include_router(websockets.router, prefix="/ws", tags=["websockets"])
-# TODO: 注册其他路由
-# from app.api import config
-# app.include_router(config.router, prefix="/api/config", tags=["config"])

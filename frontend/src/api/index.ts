@@ -30,3 +30,4 @@ export {
   type HistoryQueryParams,
   type AggregatedQueryParams
 } from './history'
+export { getConfig, updateConfig } from './config'

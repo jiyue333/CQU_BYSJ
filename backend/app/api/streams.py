@@ -1,6 +1,8 @@
 """流管理 REST API
 
 提供视频流的 CRUD 操作和生命周期管理接口。
+
+Requirements: 1.1, 1.2, 1.3, 1.4, 1.5
 """
 
 import json
@@ -10,7 +12,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.logging import get_logger, log_error, log_info
 from app.core.redis import get_redis
+
+logger = get_logger(__name__)
 from app.models.video_stream import StreamStatus
 from app.schemas.detection import DetectionResult
 from app.schemas.video_stream import (
@@ -65,8 +70,10 @@ async def create_stream(
     - webcam: 不需要额外字段
     - rtsp: 需要 source_url (RTSP 地址)
     """
+    log_info(logger, "Creating stream", stream_type=data.type.value, name=data.name)
     service = get_stream_service(db)
     stream = await service.create(data)
+    log_info(logger, "Stream created", stream_id=stream.id, stream_type=data.type.value)
     return _stream_to_response(stream)
 
 
@@ -104,6 +111,7 @@ async def get_stream(
         stream = await service.get_or_raise(stream_id)
         return _stream_to_response(stream)
     except StreamNotFoundError:
+        log_error(logger, "Stream not found", stream_id=stream_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Stream {stream_id} not found"
@@ -167,26 +175,32 @@ async def start_stream(
     2. 默认开启推理（可通过 enable_infer=false 关闭）
     3. 状态变为 RUNNING
     """
+    log_info(logger, "Starting stream", stream_id=stream_id)
     service = get_stream_service(db)
     try:
         stream, publish_info = await service.start(stream_id, options)
+        log_info(logger, "Stream started", stream_id=stream_id, status=stream.status.value)
         return _stream_to_response(stream, publish_info)
     except StreamNotFoundError:
+        log_error(logger, "Stream not found for start", stream_id=stream_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Stream {stream_id} not found"
         )
     except ConcurrentLimitError as e:
+        log_error(logger, "Concurrent limit exceeded", stream_id=stream_id, error=e)
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=str(e)
         )
     except InvalidStateTransitionError as e:
+        log_error(logger, "Invalid state transition", stream_id=stream_id, error=e)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(e)
         )
     except GatewayError as e:
+        log_error(logger, "Gateway error on start", stream_id=stream_id, error=e)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(e)
@@ -210,16 +224,20 @@ async def stop_stream(
     2. 强制停止推理（无论 enable_infer 设置）
     3. 状态变为 STOPPED
     """
+    log_info(logger, "Stopping stream", stream_id=stream_id)
     service = get_stream_service(db)
     try:
         stream = await service.stop(stream_id)
+        log_info(logger, "Stream stopped", stream_id=stream_id)
         return _stream_to_response(stream)
     except StreamNotFoundError:
+        log_error(logger, "Stream not found for stop", stream_id=stream_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Stream {stream_id} not found"
         )
     except InvalidStateTransitionError as e:
+        log_error(logger, "Invalid state transition on stop", stream_id=stream_id, error=e)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(e)
@@ -241,10 +259,13 @@ async def delete_stream(
     如果流正在运行，会先停止再删除。
     同时删除关联的 ROI 配置和系统配置。
     """
+    log_info(logger, "Deleting stream", stream_id=stream_id)
     service = get_stream_service(db)
     try:
         await service.delete(stream_id)
+        log_info(logger, "Stream deleted", stream_id=stream_id)
     except StreamNotFoundError:
+        log_error(logger, "Stream not found for delete", stream_id=stream_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Stream {stream_id} not found"
