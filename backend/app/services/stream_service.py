@@ -230,7 +230,6 @@ class StreamService:
             "stream_starting",
             stream_id=stream_id,
             type=stream.type.value,
-            enable_infer=options.enable_infer
         )
         
         publish_info: Optional[PublishInfo] = None
@@ -282,36 +281,35 @@ class StreamService:
             stream.status = StreamStatus.RUNNING
             await self.db.flush()
             
-            # 方案 F：默认启动渲染服务（替代原 inference_control）
-            if options.enable_infer:
-                try:
-                    # 构建容器内拉流/推流地址
-                    src_rtsp_url = self.gateway.build_internal_rtsp_url(stream_id)
-                    render_stream_id = self.gateway.build_render_stream_id(stream_id)
-                    dst_rtmp_url = self.gateway.build_internal_rtmp_url(render_stream_id)
-                    
-                    await self.render_control.send_start(
-                        stream_id=stream_id,
-                        src_rtsp_url=src_rtsp_url,
-                        dst_rtmp_url=dst_rtmp_url,
-                        render_stream_id=render_stream_id,
-                    )
-                except Exception as render_err:
-                    # 渲染服务启动失败，回滚网关资源
-                    logger.error(
-                        "render_start_failed",
-                        stream_id=stream_id,
-                        error=str(render_err)
-                    )
-                    if gateway_created:
-                        try:
-                            await self.gateway.delete_stream(stream_id)
-                        except Exception:
-                            pass  # Best effort cleanup
-                    stream.status = StreamStatus.ERROR
-                    stream.play_url = None
-                    await self.db.flush()
-                    raise GatewayError(f"Failed to start render: {render_err}") from render_err
+            # 方案 F：默认启动渲染服务
+            try:
+                # 构建容器内拉流/推流地址
+                src_rtsp_url = self.gateway.build_internal_rtsp_url(stream_id)
+                render_stream_id = self.gateway.build_render_stream_id(stream_id)
+                dst_rtmp_url = self.gateway.build_internal_rtmp_url(render_stream_id)
+                
+                await self.render_control.send_start(
+                    stream_id=stream_id,
+                    src_rtsp_url=src_rtsp_url,
+                    dst_rtmp_url=dst_rtmp_url,
+                    render_stream_id=render_stream_id,
+                )
+            except Exception as render_err:
+                # 渲染服务启动失败，回滚网关资源
+                logger.error(
+                    "render_start_failed",
+                    stream_id=stream_id,
+                    error=str(render_err)
+                )
+                if gateway_created:
+                    try:
+                        await self.gateway.delete_stream(stream_id)
+                    except Exception:
+                        pass  # Best effort cleanup
+                stream.status = StreamStatus.ERROR
+                stream.play_url = None
+                await self.db.flush()
+                raise GatewayError(f"Failed to start render: {render_err}") from render_err
             
             logger.info(
                 "stream_started",

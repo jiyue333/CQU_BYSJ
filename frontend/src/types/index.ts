@@ -57,7 +57,9 @@ export interface VideoStreamCreate {
 }
 
 // 启动视频流请求
+// 方案 F：默认启用渲染，enable_infer 已废弃但保留用于向后兼容
 export interface VideoStreamStart {
+  /** @deprecated 方案 F 默认启用渲染，此字段已废弃 */
   enable_infer?: boolean
 }
 

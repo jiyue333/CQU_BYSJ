@@ -188,7 +188,7 @@ async def get_latest_result(
     "/{stream_id}/start",
     response_model=VideoStreamResponse,
     summary="启动视频流",
-    description="启动指定的视频流，开始播放和推理。"
+    description="启动指定的视频流，开始播放和渲染。方案 F：默认启用服务端热力图渲染。"
 )
 async def start_stream(
     stream_id: str,
@@ -197,10 +197,11 @@ async def start_stream(
 ) -> VideoStreamResponse:
     """启动视频流
     
-    启动后：
-    1. 网关产生可播放流（play_url 可用）
-    2. 默认开启推理（可通过 enable_infer=false 关闭）
-    3. 状态变为 RUNNING
+    方案 F 启动后：
+    1. 网关产生原始流
+    2. 渲染服务拉流 → 推理 → 热力图叠加 → 推流
+    3. play_url 返回渲染流地址（{stream_id}_heatmap）
+    4. 状态变为 RUNNING
     """
     log_info(logger, "Starting stream", stream_id=stream_id)
     service = get_stream_service(db)
@@ -248,7 +249,7 @@ async def stop_stream(
     
     停止后：
     1. 停止播放流（断开 publish/pull）
-    2. 强制停止推理（无论 enable_infer 设置）
+    2. 停止渲染服务
     3. 状态变为 STOPPED
     """
     log_info(logger, "Stopping stream", stream_id=stream_id)

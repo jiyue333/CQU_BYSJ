@@ -84,6 +84,10 @@ export async function getLatestResult(streamId: string): Promise<DetectionResult
 
 /**
  * 启动视频流
+ * 
+ * 方案 F：默认启用服务端热力图渲染
+ * - play_url 返回渲染流地址（{stream_id}_heatmap）
+ * - options.enable_infer 已废弃，保留用于向后兼容
  */
 export async function startStream(
   streamId: string,

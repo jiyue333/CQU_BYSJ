@@ -95,8 +95,12 @@ class VideoStreamUpdate(BaseModel):
 
 
 class VideoStreamStart(BaseModel):
-    """启动视频流请求 Schema"""
-    enable_infer: bool = Field(True, description="是否开启推理")
+    """启动视频流请求 Schema
+    
+    方案 F：默认启用渲染，无需额外参数。
+    保留此类用于未来扩展（如指定渲染参数）。
+    """
+    pass
 
 
 class IceServer(BaseModel):

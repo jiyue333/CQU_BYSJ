@@ -1,6 +1,14 @@
 """WebSocket 状态推送服务
 
 推送所有视频流的状态变更到订阅的客户端。
+
+方案 F：监听 inference:status Stream（RenderWorker 复用此 Stream 上报状态）
+事件映射：
+- RENDER_STARTED / STARTED → running
+- RENDER_STOPPED / STOPPED → stopped
+- RENDER_ERROR / ERROR → error
+- RENDER_COOLDOWN / COOLDOWN → cooldown
+- HEALTH_UPDATE → 忽略（不影响前端状态）
 """
 
 import asyncio
@@ -23,11 +31,32 @@ class StatusPushService:
     
     职责：
     - 管理状态订阅的 WebSocket 连接
-    - 消费 Redis Streams 状态上报
+    - 消费 Redis Streams 状态上报（RenderWorker 复用 inference:status）
     - 推送状态变更到所有订阅的客户端
+    
+    方案 F 事件映射：
+    - STARTED / RENDER_STARTED → running
+    - STOPPED / RENDER_STOPPED → stopped
+    - ERROR / RENDER_ERROR → error
+    - COOLDOWN / RENDER_COOLDOWN → cooldown
     """
     
+    # RenderWorker 复用此 Stream 上报状态
     STATUS_STREAM = "inference:status"
+    
+    # 事件到状态的映射（支持 Inference 和 Render 两种前缀）
+    EVENT_TO_STATUS = {
+        # 原 Inference 事件（向后兼容）
+        "STARTED": "running",
+        "STOPPED": "stopped",
+        "COOLDOWN": "cooldown",
+        "ERROR": "error",
+        # 方案 F Render 事件
+        "RENDER_STARTED": "running",
+        "RENDER_STOPPED": "stopped",
+        "RENDER_COOLDOWN": "cooldown",
+        "RENDER_ERROR": "error",
+    }
     
     def __init__(self):
         self._redis: Optional[redis.Redis] = None
@@ -181,7 +210,10 @@ class StatusPushService:
             return False
 
     async def _broadcast(self, data: str):
-        """广播状态消息到所有订阅的客户端"""
+        """广播状态消息到所有订阅的客户端
+        
+        方案 F：使用 EVENT_TO_STATUS 映射处理 Render 事件
+        """
         # 安全解析 JSON 数据
         try:
             parsed_data = json.loads(data) if isinstance(data, str) else data
@@ -189,16 +221,11 @@ class StatusPushService:
             logger.warning(f"Invalid JSON status data: {data[:100]}")
             parsed_data = {"raw": data}
 
-        # Normalize inference events to stream status updates for frontend
+        # Normalize events to stream status updates for frontend
         if isinstance(parsed_data, dict) and "status" not in parsed_data:
             event = parsed_data.get("event")
             if event:
-                event_map = {
-                    "STARTED": "running",
-                    "STOPPED": "stopped",
-                    "COOLDOWN": "cooldown",
-                }
-                mapped_status = event_map.get(event)
+                mapped_status = self.EVENT_TO_STATUS.get(event)
                 if not mapped_status:
                     # Ignore non-status events (e.g. HEALTH_UPDATE)
                     return
