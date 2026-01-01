@@ -8,7 +8,6 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import VideoSourceSelector from './components/VideoSourceSelector.vue'
 import VideoPlayer from './components/VideoPlayer.vue'
-import HeatmapOverlay from './components/HeatmapOverlay.vue'
 import StatsPanel from './components/StatsPanel.vue'
 import ConfigPanel from './components/ConfigPanel.vue'
 import ErrorNotification from './components/ErrorNotification.vue'
@@ -21,18 +20,15 @@ const store = useStreamsStore()
 // 当前选中的流
 const selectedStreamId = ref<string | null>(null)
 
-// 热力图显示开关
-const showHeatmap = ref(true)
-const playbackDelaySec = ref(0)  // 设为 0 避免热力图与视频不同步
+// 方案 F：服务端渲染热力图，前端无需延迟控制
+const playbackDelaySec = ref(0)
 
 // 删除确认对话框
 const showDeleteConfirm = ref(false)
 const streamToDelete = ref<string | null>(null)
 
-// 视频容器尺寸
+// 视频容器引用
 const videoContainerRef = ref<HTMLDivElement | null>(null)
-const videoWidth = ref(640)
-const videoHeight = ref(480)
 
 // 计算属性
 const selectedStream = computed<VideoStream | undefined>(() => {
@@ -45,21 +41,8 @@ const latestResult = computed<DetectionResult | null>(() => {
   return store.getDetectionResult(selectedStreamId.value) ?? null
 })
 
-// 简化：直接使用最新结果，不做时间对齐（避免延迟问题）
+// 简化：直接使用最新结果
 const displayResult = computed<DetectionResult | null>(() => latestResult.value)
-
-const heatmapGrid = computed(() => {
-  return displayResult.value?.heatmap_grid || null
-})
-
-// 从检测结果获取视频宽高比
-const videoAspectRatio = computed(() => {
-  const result = displayResult.value
-  if (!result || !result.frame_width || !result.frame_height) {
-    return 16 / 9  // 默认 16:9
-  }
-  return result.frame_width / result.frame_height
-})
 
 // 连接状态
 const connectionState = computed(() => ({
@@ -183,14 +166,6 @@ watch(
   }
 )
 
-// 更新视频容器尺寸
-function updateVideoSize() {
-  if (videoContainerRef.value) {
-    videoWidth.value = videoContainerRef.value.clientWidth
-    videoHeight.value = videoContainerRef.value.clientHeight
-  }
-}
-
 // 监听窗口大小变化
 onMounted(async () => {
   // 获取流列表
@@ -203,15 +178,10 @@ onMounted(async () => {
 
   // 订阅状态变更
   store.subscribeStatus()
-
-  // 监听窗口大小
-  window.addEventListener('resize', updateVideoSize)
-  updateVideoSize()
 })
 
 onUnmounted(() => {
   store.cleanup()
-  window.removeEventListener('resize', updateVideoSize)
 })
 
 // 状态配置
@@ -391,13 +361,7 @@ function canStop(status: StreamStatus): boolean {
               :status="selectedStream.status"
               :playback-delay-sec="playbackDelaySec"
             />
-            <HeatmapOverlay
-              :heatmap-grid="heatmapGrid"
-              :visible="showHeatmap"
-              :width="videoWidth"
-              :height="videoHeight"
-              :video-aspect-ratio="videoAspectRatio"
-            />
+            <!-- 方案 F：热力图由服务端渲染到视频流中，前端无需叠加 -->
           </template>
           <div v-else class="no-stream">
             <span class="no-stream-icon">📺</span>
@@ -437,13 +401,6 @@ function canStop(status: StreamStatus): boolean {
             >
               🗑 删除
             </button>
-          </div>
-
-          <div class="control-toggles">
-            <label class="toggle">
-              <input v-model="showHeatmap" type="checkbox" />
-              <span>显示热力图</span>
-            </label>
           </div>
         </div>
       </div>
@@ -808,26 +765,6 @@ function canStop(status: StreamStatus): boolean {
 
 .btn-delete:hover {
   background: rgba(244, 67, 54, 0.3);
-}
-
-.control-toggles {
-  display: flex;
-  gap: 16px;
-}
-
-.toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  font-size: 14px;
-  color: #aaa;
-}
-
-.toggle input {
-  width: 18px;
-  height: 18px;
-  accent-color: #4a9eff;
 }
 
 /* 删除确认对话框 */

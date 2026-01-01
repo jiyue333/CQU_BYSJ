@@ -82,8 +82,8 @@ class TestConcurrentStreamCreation:
         return gateway
 
     @pytest.fixture
-    def mock_inference_control(self):
-        """Mock 推理控制服务"""
+    def mock_render_control(self):
+        """Mock 渲染控制服务"""
         control = AsyncMock()
         control.send_start = AsyncMock(return_value="cmd_start")
         control.send_stop = AsyncMock(return_value="cmd_stop")
@@ -91,7 +91,7 @@ class TestConcurrentStreamCreation:
 
     @pytest.mark.asyncio
     async def test_create_multiple_streams_sequentially(
-        self, test_db: AsyncSession, mock_gateway, mock_inference_control
+        self, test_db: AsyncSession, mock_gateway, mock_render_control
     ):
         """测试顺序创建多路视频流
         
@@ -100,7 +100,7 @@ class TestConcurrentStreamCreation:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         num_streams = 5
@@ -132,7 +132,7 @@ class TestConcurrentStreamCreation:
 
     @pytest.mark.asyncio
     async def test_start_multiple_streams_sequentially(
-        self, test_db: AsyncSession, mock_gateway, mock_inference_control
+        self, test_db: AsyncSession, mock_gateway, mock_render_control
     ):
         """测试顺序启动多路视频流
         
@@ -141,7 +141,7 @@ class TestConcurrentStreamCreation:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         num_streams = 3
@@ -178,7 +178,7 @@ class TestConcurrentStreamCreation:
 
     @pytest.mark.asyncio
     async def test_concurrent_limit_enforcement(
-        self, test_db: AsyncSession, mock_gateway, mock_inference_control
+        self, test_db: AsyncSession, mock_gateway, mock_render_control
     ):
         """测试并发限制执行
         
@@ -193,7 +193,7 @@ class TestConcurrentStreamCreation:
             service = StreamService(
                 db=test_db,
                 gateway=mock_gateway,
-                inference_control=mock_inference_control
+                render_control=mock_render_control
             )
             
             streams = []
@@ -236,7 +236,7 @@ class TestConcurrentStreamCreation:
 
     @pytest.mark.asyncio
     async def test_mixed_stream_types_concurrent(
-        self, test_db: AsyncSession, mock_gateway, mock_inference_control
+        self, test_db: AsyncSession, mock_gateway, mock_render_control
     ):
         """测试混合类型流的并发处理
         
@@ -245,7 +245,7 @@ class TestConcurrentStreamCreation:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         # 创建不同类型的流
@@ -321,8 +321,8 @@ class TestConcurrentStreamOperations:
         return gateway
 
     @pytest.fixture
-    def mock_inference_control(self):
-        """Mock 推理控制服务"""
+    def mock_render_control(self):
+        """Mock 渲染控制服务"""
         control = AsyncMock()
         control.send_start = AsyncMock(return_value="cmd_start")
         control.send_stop = AsyncMock(return_value="cmd_stop")
@@ -330,7 +330,7 @@ class TestConcurrentStreamOperations:
 
     @pytest.mark.asyncio
     async def test_running_count_accuracy(
-        self, test_db: AsyncSession, mock_gateway, mock_inference_control
+        self, test_db: AsyncSession, mock_gateway, mock_render_control
     ):
         """测试运行中流计数的准确性
         
@@ -339,7 +339,7 @@ class TestConcurrentStreamOperations:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         # 初始计数应为 0
@@ -374,7 +374,7 @@ class TestConcurrentStreamOperations:
 
     @pytest.mark.asyncio
     async def test_stream_isolation(
-        self, test_db: AsyncSession, mock_gateway, mock_inference_control
+        self, test_db: AsyncSession, mock_gateway, mock_render_control
     ):
         """测试流之间的隔离性
         
@@ -384,7 +384,7 @@ class TestConcurrentStreamOperations:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         # 创建两个流
@@ -599,8 +599,8 @@ class TestResourceMonitoring:
         return gateway
 
     @pytest.fixture
-    def mock_inference_control(self):
-        """Mock 推理控制服务"""
+    def mock_render_control(self):
+        """Mock 渲染控制服务"""
         control = AsyncMock()
         control.send_start = AsyncMock(return_value="cmd_start")
         control.send_stop = AsyncMock(return_value="cmd_stop")
@@ -608,7 +608,7 @@ class TestResourceMonitoring:
 
     @pytest.mark.asyncio
     async def test_concurrent_limit_check(
-        self, test_db: AsyncSession, mock_gateway, mock_inference_control
+        self, test_db: AsyncSession, mock_gateway, mock_render_control
     ):
         """测试并发限制检查
         
@@ -617,7 +617,7 @@ class TestResourceMonitoring:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         # 初始应该允许创建
@@ -640,7 +640,7 @@ class TestResourceMonitoring:
 
     @pytest.mark.asyncio
     async def test_gateway_calls_per_stream(
-        self, test_db: AsyncSession, mock_gateway, mock_inference_control
+        self, test_db: AsyncSession, mock_gateway, mock_render_control
     ):
         """测试每个流的网关调用
         
@@ -650,7 +650,7 @@ class TestResourceMonitoring:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         num_streams = 3
@@ -681,10 +681,10 @@ class TestResourceMonitoring:
             await service.delete(stream.id)
 
     @pytest.mark.asyncio
-    async def test_inference_control_calls_per_stream(
-        self, test_db: AsyncSession, mock_gateway, mock_inference_control
+    async def test_render_control_calls_per_stream(
+        self, test_db: AsyncSession, mock_gateway, mock_render_control
     ):
-        """测试每个流的推理控制调用
+        """测试每个流的渲染控制调用
         
         验证每个流启动/停止时都正确调用推理控制。
         Requirements: 7.1
@@ -692,7 +692,7 @@ class TestResourceMonitoring:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         num_streams = 3
@@ -708,15 +708,15 @@ class TestResourceMonitoring:
             streams.append(stream)
             await service.start(stream.id)
         
-        # 验证推理控制启动被调用了正确的次数
-        assert mock_inference_control.send_start.call_count == num_streams
+        # 验证渲染控制启动被调用了正确的次数
+        assert mock_render_control.send_start.call_count == num_streams
         
         # 停止所有流
         for stream in streams:
             await service.stop(stream.id)
         
-        # 验证推理控制停止被调用了正确的次数
-        assert mock_inference_control.send_stop.call_count == num_streams
+        # 验证渲染控制停止被调用了正确的次数
+        assert mock_render_control.send_stop.call_count == num_streams
         
         # 清理
         for stream in streams:
@@ -890,8 +890,8 @@ class TestTrueConcurrentOperations:
         return gateway
 
     @pytest.fixture
-    def mock_inference_control(self):
-        """Mock 推理控制服务"""
+    def mock_render_control(self):
+        """Mock 渲染控制服务"""
         control = AsyncMock()
         control.send_start = AsyncMock(return_value="cmd_start")
         control.send_stop = AsyncMock(return_value="cmd_stop")
@@ -899,7 +899,7 @@ class TestTrueConcurrentOperations:
 
     @pytest.mark.asyncio
     async def test_concurrent_stream_creation_with_gather(
-        self, db_engine_and_factory, mock_gateway, mock_inference_control
+        self, db_engine_and_factory, mock_gateway, mock_render_control
     ):
         """测试使用 asyncio.gather 并发创建流
         
@@ -916,7 +916,7 @@ class TestTrueConcurrentOperations:
                 service = StreamService(
                     db=session,
                     gateway=mock_gateway,
-                    inference_control=mock_inference_control
+                    render_control=mock_render_control
                 )
                 stream = await service.create(VideoStreamCreate(
                     name=f"并发创建流_{i}",
@@ -941,7 +941,7 @@ class TestTrueConcurrentOperations:
             service = StreamService(
                 db=session,
                 gateway=mock_gateway,
-                inference_control=mock_inference_control
+                render_control=mock_render_control
             )
             all_streams = await service.list_all()
             assert len(all_streams) == num_streams
@@ -953,7 +953,7 @@ class TestTrueConcurrentOperations:
 
     @pytest.mark.asyncio
     async def test_concurrent_start_stop_interleaved(
-        self, db_engine_and_factory, mock_gateway, mock_inference_control
+        self, db_engine_and_factory, mock_gateway, mock_render_control
     ):
         """测试并发启动和停止交错操作
         
@@ -968,7 +968,7 @@ class TestTrueConcurrentOperations:
             service = StreamService(
                 db=session,
                 gateway=mock_gateway,
-                inference_control=mock_inference_control
+                render_control=mock_render_control
             )
             for i in range(4):
                 stream = await service.create(VideoStreamCreate(
@@ -984,7 +984,7 @@ class TestTrueConcurrentOperations:
             service = StreamService(
                 db=session,
                 gateway=mock_gateway,
-                inference_control=mock_inference_control
+                render_control=mock_render_control
             )
             await service.start(stream_ids[0])
             await service.start(stream_ids[1])
@@ -996,7 +996,7 @@ class TestTrueConcurrentOperations:
                 service = StreamService(
                     db=session,
                     gateway=mock_gateway,
-                    inference_control=mock_inference_control
+                    render_control=mock_render_control
                 )
                 result = await service.stop(stream_id)
                 await session.commit()
@@ -1007,7 +1007,7 @@ class TestTrueConcurrentOperations:
                 service = StreamService(
                     db=session,
                     gateway=mock_gateway,
-                    inference_control=mock_inference_control
+                    render_control=mock_render_control
                 )
                 result = await service.start(stream_id)
                 await session.commit()
@@ -1036,7 +1036,7 @@ class TestTrueConcurrentOperations:
             service = StreamService(
                 db=session,
                 gateway=mock_gateway,
-                inference_control=mock_inference_control
+                render_control=mock_render_control
             )
             for stream_id in stream_ids:
                 fetched = await service.get(stream_id)
@@ -1124,7 +1124,7 @@ class TestFailureScenarios:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference
+            render_control=mock_inference
         )
         
         # 创建流
@@ -1146,8 +1146,8 @@ class TestFailureScenarios:
         await service.delete(stream.id)
 
     @pytest.mark.asyncio
-    async def test_inference_control_failure_on_start(self, test_db: AsyncSession):
-        """测试推理控制启动失败时的处理
+    async def test_render_control_failure_on_start(self, test_db: AsyncSession):
+        """测试渲染控制启动失败时的处理
         
         Requirements: 7.1
         """
@@ -1158,21 +1158,21 @@ class TestFailureScenarios:
         ))
         mock_gateway.delete_stream = AsyncMock(return_value=True)
         
-        mock_inference = AsyncMock()
-        mock_inference.send_start = AsyncMock(
-            side_effect=Exception("Inference service unavailable")
+        mock_render = AsyncMock()
+        mock_render.send_start = AsyncMock(
+            side_effect=Exception("Render service unavailable")
         )
-        mock_inference.send_stop = AsyncMock()
+        mock_render.send_stop = AsyncMock()
         
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference
+            render_control=mock_render
         )
         
         # 创建流
         stream = await service.create(VideoStreamCreate(
-            name="推理失败测试流",
+            name="渲染失败测试流",
             type=StreamType.RTSP,
             source_url="rtsp://test.com/stream"
         ))
@@ -1230,7 +1230,7 @@ class TestFailureScenarios:
             service = StreamService(
                 db=session,
                 gateway=mock_gateway,
-                inference_control=mock_inference
+                render_control=mock_inference
             )
             for i in range(3):
                 stream = await service.create(VideoStreamCreate(
@@ -1248,7 +1248,7 @@ class TestFailureScenarios:
                     service = StreamService(
                         db=session,
                         gateway=mock_gateway,
-                        inference_control=mock_inference
+                        render_control=mock_inference
                     )
                     result = await service.start(stream_id)
                     await session.commit()
@@ -1270,7 +1270,7 @@ class TestFailureScenarios:
             service = StreamService(
                 db=session,
                 gateway=mock_gateway,
-                inference_control=mock_inference
+                render_control=mock_inference
             )
             for stream_id in stream_ids:
                 try:
@@ -1345,8 +1345,8 @@ class TestResourceMetrics:
         return gateway
 
     @pytest.fixture
-    def mock_inference_control(self):
-        """Mock 推理控制服务"""
+    def mock_render_control(self):
+        """Mock 渲染控制服务"""
         control = AsyncMock()
         control.send_start = AsyncMock(return_value="cmd_start")
         control.send_stop = AsyncMock(return_value="cmd_stop")
@@ -1354,7 +1354,7 @@ class TestResourceMetrics:
 
     @pytest.mark.asyncio
     async def test_operation_latency(
-        self, test_db: AsyncSession, mock_gateway, mock_inference_control
+        self, test_db: AsyncSession, mock_gateway, mock_render_control
     ):
         """测试操作延迟
         
@@ -1365,7 +1365,7 @@ class TestResourceMetrics:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         # 测试创建延迟
@@ -1401,7 +1401,7 @@ class TestResourceMetrics:
 
     @pytest.mark.asyncio
     async def test_concurrent_operation_throughput(
-        self, db_engine_and_factory, mock_gateway, mock_inference_control
+        self, db_engine_and_factory, mock_gateway, mock_render_control
     ):
         """测试并发操作吞吐量
         
@@ -1422,7 +1422,7 @@ class TestResourceMetrics:
                 service = StreamService(
                     db=session,
                     gateway=mock_gateway,
-                    inference_control=mock_inference_control
+                    render_control=mock_render_control
                 )
                 stream = await service.create(VideoStreamCreate(
                     name=f"吞吐量测试流_{i}",
@@ -1445,7 +1445,7 @@ class TestResourceMetrics:
             service = StreamService(
                 db=session,
                 gateway=mock_gateway,
-                inference_control=mock_inference_control
+                render_control=mock_render_control
             )
             for stream_id in stream_ids:
                 await service.delete(stream_id)

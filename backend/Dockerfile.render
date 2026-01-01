@@ -1,5 +1,5 @@
-# 人流计数系统 - 推理服务 Dockerfile
-# 独立的 YOLO 推理服务，支持 GPU 加速
+# 人流计数系统 - 渲染服务 Dockerfile（方案 F）
+# 服务端热力图渲染：拉流 → YOLO 推理 → 叠加 → 推流
 
 # ============================================
 # 阶段 1: 构建阶段
@@ -31,10 +31,13 @@ FROM python:3.11-slim AS runtime
 
 WORKDIR /app
 
-# 安装运行时依赖（包含 OpenCV 和 FFmpeg）
+# 安装运行时依赖
+# - ffmpeg: 拉流解码 + 编码推流
+# - libgl1-mesa-glx: OpenCV 运行依赖
+# - procps: 健康检查用 pgrep
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
-    libgl1 \
+    libgl1-mesa-glx \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
@@ -48,9 +51,8 @@ COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # 复制应用代码
-# 复制整个 app 目录以确保所有依赖都存在
 COPY app/ ./app/
-COPY inference_main.py ./
+COPY render_main.py ./
 COPY yolov8n.pt ./
 
 # 创建非 root 用户
@@ -64,9 +66,9 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app
 
-# 健康检查（通过检查进程是否存在）
+# 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD pgrep -f "inference_main.py" || exit 1
+    CMD pgrep -f "render_main.py" || exit 1
 
 # 启动命令
-CMD ["python", "inference_main.py"]
+CMD ["python", "render_main.py"]

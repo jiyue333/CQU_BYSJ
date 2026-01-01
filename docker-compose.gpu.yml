@@ -1,5 +1,5 @@
 # Docker Compose GPU 扩展配置
-# 人流计数与密度分析系统 - GPU 加速版本
+# 人流计数与密度分析系统 - GPU 加速版本（方案 F）
 #
 # 使用方法：
 #   docker-compose -f docker-compose.prod.yml -f docker-compose.gpu.yml up -d
@@ -10,8 +10,8 @@
 #      安装指南: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
 
 services:
-  inference:
-    # 覆盖推理服务配置以启用 GPU
+  render:
+    # 覆盖渲染服务配置以启用 GPU
     deploy:
       resources:
         reservations:
@@ -24,14 +24,16 @@ services:
       REDIS_URL: redis://redis:6379/0
       ZLM_BASE_URL: http://zlmediakit:80
       ZLM_SECRET: ${ZLM_SECRET:-your_api_secret_here}
-      INFERENCE_FPS: ${INFERENCE_FPS:-2}
+      ZLM_RTSP_PORT: 554
+      ZLM_RTMP_PORT: 1935
+      # 渲染配置
+      RENDER_FPS: ${RENDER_FPS:-24}
+      RENDER_INFER_STRIDE: ${RENDER_INFER_STRIDE:-3}
+      RENDER_OVERLAY_ALPHA: ${RENDER_OVERLAY_ALPHA:-0.6}
+      # 推理配置
       CONFIDENCE_THRESHOLD: ${CONFIDENCE_THRESHOLD:-0.5}
       HEATMAP_GRID_SIZE: ${HEATMAP_GRID_SIZE:-20}
       HEATMAP_DECAY: ${HEATMAP_DECAY:-0.3}
-      SNAP_TIMEOUT_SEC: ${SNAP_TIMEOUT_SEC:-2.0}
-      SNAP_MAX_FAILURES: ${SNAP_MAX_FAILURES:-5}
-      SNAP_BACKOFF_BASE: ${SNAP_BACKOFF_BASE:-1.0}
-      SNAP_BACKOFF_MAX: ${SNAP_BACKOFF_MAX:-30.0}
       COOLDOWN_DURATION: ${COOLDOWN_DURATION:-60}
       STREAM_RESULT_MAXLEN: ${STREAM_RESULT_MAXLEN:-500}
       STREAM_STATUS_MAXLEN: ${STREAM_STATUS_MAXLEN:-1000}
@@ -39,4 +41,4 @@ services:
       LOG_FORMAT: json
       # GPU 特定配置
       NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,video

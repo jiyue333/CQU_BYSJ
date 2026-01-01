@@ -86,33 +86,33 @@ services:
       retries: 3
 
   # ============================================
-  # 推理服务 (YOLO Worker)
-  # 独立的推理服务，通过 Redis 与后端通信
-  # 支持水平扩展：docker-compose up -d --scale inference=3
+  # 渲染服务 (方案 F: 服务端热力图渲染)
+  # 拉流 → YOLO 推理 → 热力图叠加 → 推流
+  # 支持水平扩展：docker-compose up -d --scale render=2
   # ============================================
-  inference:
+  render:
     build:
       context: ./backend
-      dockerfile: Dockerfile.inference
+      dockerfile: Dockerfile.render
     # 注意：水平扩展时不要设置 container_name
-    # container_name: crowd-counting-inference
+    # container_name: crowd-counting-render
     restart: unless-stopped
     environment:
       # Redis 配置
       REDIS_URL: redis://redis:6379/0
-      # ZLMediaKit 配置（用于抓取快照）
+      # ZLMediaKit 配置（容器内地址）
       ZLM_BASE_URL: http://zlmediakit:80
       ZLM_SECRET: ${ZLM_SECRET:-your_api_secret_here}
+      ZLM_RTSP_PORT: 554
+      ZLM_RTMP_PORT: 1935
+      # 渲染配置
+      RENDER_FPS: ${RENDER_FPS:-24}
+      RENDER_INFER_STRIDE: ${RENDER_INFER_STRIDE:-3}
+      RENDER_OVERLAY_ALPHA: ${RENDER_OVERLAY_ALPHA:-0.6}
       # 推理配置
-      INFERENCE_FPS: ${INFERENCE_FPS:-2}
       CONFIDENCE_THRESHOLD: ${CONFIDENCE_THRESHOLD:-0.5}
       HEATMAP_GRID_SIZE: ${HEATMAP_GRID_SIZE:-20}
       HEATMAP_DECAY: ${HEATMAP_DECAY:-0.3}
-      # 快照配置
-      SNAP_TIMEOUT_SEC: ${SNAP_TIMEOUT_SEC:-2.0}
-      SNAP_MAX_FAILURES: ${SNAP_MAX_FAILURES:-5}
-      SNAP_BACKOFF_BASE: ${SNAP_BACKOFF_BASE:-1.0}
-      SNAP_BACKOFF_MAX: ${SNAP_BACKOFF_MAX:-30.0}
       # 冷却配置
       COOLDOWN_DURATION: ${COOLDOWN_DURATION:-60}
       # Redis Streams 配置
@@ -128,16 +128,8 @@ services:
         condition: service_started
     networks:
       - crowd-counting-net
-    # GPU 支持（可选，取消注释以启用）
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "pgrep", "-f", "inference_main.py"]
+      test: ["CMD", "pgrep", "-f", "render_main.py"]
       interval: 30s
       timeout: 10s
       start_period: 60s

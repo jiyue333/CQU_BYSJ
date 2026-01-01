@@ -1,6 +1,7 @@
 """Services package.
 
 导出所有服务类，便于统一导入。
+方案 F：使用 RenderControlService 替代 InferenceControlService
 """
 
 from app.services.gateway_adapter import (
@@ -13,9 +14,9 @@ from app.services.gateway_adapter import (
     GatewayAPIError,
     get_gateway_adapter,
 )
-from app.services.inference_control import (
-    InferenceControlService,
-    get_inference_control,
+from app.services.render_control import (
+    RenderControlService,
+    get_render_control,
 )
 from app.services.stream_service import (
     StreamService,
@@ -51,9 +52,9 @@ __all__ = [
     "GatewayConnectionError",
     "GatewayAPIError",
     "get_gateway_adapter",
-    # Inference Control
-    "InferenceControlService",
-    "get_inference_control",
+    # Render Control (方案 F)
+    "RenderControlService",
+    "get_render_control",
     # Stream Service
     "StreamService",
     "StreamServiceError",

@@ -673,6 +673,8 @@ defineExpose({
     <!-- 协议指示器 -->
     <div v-if="currentProtocol !== 'none'" class="protocol-badge">
       {{ currentProtocol.toUpperCase() }}
+      <!-- 方案 F：服务端渲染流预计有 1-5 秒延迟 -->
+      <span class="delay-hint">~1-5s</span>
     </div>
 
     <!-- 状态指示器 -->
@@ -732,6 +734,15 @@ defineExpose({
   font-size: 12px;
   font-weight: 500;
   border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.delay-hint {
+  color: #888;
+  font-size: 10px;
+  font-weight: 400;
 }
 
 .status-badge {

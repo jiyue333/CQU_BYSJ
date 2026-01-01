@@ -100,8 +100,8 @@ def mock_gateway():
 
 
 @pytest.fixture
-def mock_inference_control():
-    """Mock 推理控制服务"""
+def mock_render_control():
+    """Mock 渲染控制服务"""
     control = AsyncMock()
     control.send_start = AsyncMock(return_value="cmd_123")
     control.send_stop = AsyncMock(return_value="cmd_456")
@@ -120,7 +120,7 @@ class TestVideoSourceUnifiedAbstraction:
         self, 
         test_db: AsyncSession,
         mock_gateway,
-        mock_inference_control,
+        mock_render_control,
     ):
         """Property: FILE 类型视频源创建后返回有效的 stream_id
         
@@ -130,7 +130,7 @@ class TestVideoSourceUnifiedAbstraction:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         # 测试多个不同的输入
@@ -155,12 +155,12 @@ class TestVideoSourceUnifiedAbstraction:
             assert stream.type == StreamType.FILE
 
     @pytest.mark.asyncio
-    async def test_file_stream_creation(self, test_db: AsyncSession, mock_gateway, mock_inference_control):
+    async def test_file_stream_creation(self, test_db: AsyncSession, mock_gateway, mock_render_control):
         """测试 FILE 类型流创建"""
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         data = VideoStreamCreate(
@@ -178,12 +178,12 @@ class TestVideoSourceUnifiedAbstraction:
         assert stream.status == StreamStatus.STOPPED
 
     @pytest.mark.asyncio
-    async def test_webcam_stream_creation(self, test_db: AsyncSession, mock_gateway, mock_inference_control):
+    async def test_webcam_stream_creation(self, test_db: AsyncSession, mock_gateway, mock_render_control):
         """测试 WEBCAM 类型流创建"""
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         data = VideoStreamCreate(
@@ -200,12 +200,12 @@ class TestVideoSourceUnifiedAbstraction:
         assert stream.status == StreamStatus.STOPPED
 
     @pytest.mark.asyncio
-    async def test_rtsp_stream_creation(self, test_db: AsyncSession, mock_gateway, mock_inference_control):
+    async def test_rtsp_stream_creation(self, test_db: AsyncSession, mock_gateway, mock_render_control):
         """测试 RTSP 类型流创建"""
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         data = VideoStreamCreate(
@@ -224,7 +224,7 @@ class TestVideoSourceUnifiedAbstraction:
 
 
     @pytest.mark.asyncio
-    async def test_all_stream_types_return_valid_uuid(self, test_db: AsyncSession, mock_gateway, mock_inference_control):
+    async def test_all_stream_types_return_valid_uuid(self, test_db: AsyncSession, mock_gateway, mock_render_control):
         """Property: 所有视频源类型创建后都返回有效的 UUID stream_id
         
         *For any* 视频源类型，创建成功后 stream_id 应该是有效的 UUID v4
@@ -233,7 +233,7 @@ class TestVideoSourceUnifiedAbstraction:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         test_cases = [
@@ -273,7 +273,7 @@ class TestStreamLifecycleProperties:
 
     @pytest.mark.asyncio
     async def test_created_stream_starts_in_stopped_state(
-        self, test_db: AsyncSession, mock_gateway, mock_inference_control
+        self, test_db: AsyncSession, mock_gateway, mock_render_control
     ):
         """Property: 新创建的流初始状态为 STOPPED
         
@@ -283,7 +283,7 @@ class TestStreamLifecycleProperties:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         for stream_type in StreamType:
@@ -312,7 +312,7 @@ class TestStreamLifecycleProperties:
 
     @pytest.mark.asyncio
     async def test_started_stream_has_play_url(
-        self, test_db: AsyncSession, mock_gateway, mock_inference_control
+        self, test_db: AsyncSession, mock_gateway, mock_render_control
     ):
         """Property: 启动后的流应该有 play_url
         
@@ -322,7 +322,7 @@ class TestStreamLifecycleProperties:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         # 创建 RTSP 流
@@ -342,7 +342,7 @@ class TestStreamLifecycleProperties:
 
     @pytest.mark.asyncio
     async def test_stopped_stream_has_no_play_url(
-        self, test_db: AsyncSession, mock_gateway, mock_inference_control
+        self, test_db: AsyncSession, mock_gateway, mock_render_control
     ):
         """Property: 停止后的流 play_url 应该为空
         
@@ -352,7 +352,7 @@ class TestStreamLifecycleProperties:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         # 创建并启动流
@@ -376,7 +376,7 @@ class TestConcurrentLimitProperties:
 
     @pytest.mark.asyncio
     async def test_running_count_increases_on_start(
-        self, test_db: AsyncSession, mock_gateway, mock_inference_control
+        self, test_db: AsyncSession, mock_gateway, mock_render_control
     ):
         """Property: 启动流后运行中的流数量增加
         
@@ -386,7 +386,7 @@ class TestConcurrentLimitProperties:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         initial_count = await service.get_running_count()
@@ -405,7 +405,7 @@ class TestConcurrentLimitProperties:
 
     @pytest.mark.asyncio
     async def test_running_count_decreases_on_stop(
-        self, test_db: AsyncSession, mock_gateway, mock_inference_control
+        self, test_db: AsyncSession, mock_gateway, mock_render_control
     ):
         """Property: 停止流后运行中的流数量减少
         
@@ -415,7 +415,7 @@ class TestConcurrentLimitProperties:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         # 创建并启动流
@@ -482,7 +482,7 @@ class TestHypothesisProperties:
             service = StreamService(
                 db=session,
                 gateway=mock_gateway,
-                inference_control=mock_inference
+                render_control=mock_inference
             )
             
             data = VideoStreamCreate(
@@ -538,7 +538,7 @@ class TestHypothesisProperties:
             service = StreamService(
                 db=session,
                 gateway=mock_gateway,
-                inference_control=mock_inference
+                render_control=mock_inference
             )
             
             data = VideoStreamCreate(
@@ -597,7 +597,7 @@ class TestHypothesisProperties:
             service = StreamService(
                 db=session,
                 gateway=mock_gateway,
-                inference_control=mock_inference
+                render_control=mock_inference
             )
             
             rtsp_url = f"rtsp://{host}:{port}/{path}"

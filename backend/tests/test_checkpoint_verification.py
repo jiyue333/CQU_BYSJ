@@ -90,8 +90,8 @@ class TestStreamManagementAPI:
         return gateway
 
     @pytest.fixture
-    def mock_inference_control(self):
-        """Mock 推理控制服务"""
+    def mock_render_control(self):
+        """Mock 渲染控制服务"""
         control = AsyncMock()
         control.send_start = AsyncMock(return_value="cmd_123")
         control.send_stop = AsyncMock(return_value="cmd_456")
@@ -99,13 +99,13 @@ class TestStreamManagementAPI:
 
     @pytest.mark.asyncio
     async def test_stream_crud_operations(
-        self, test_db: AsyncSession, mock_gateway, mock_inference_control
+        self, test_db: AsyncSession, mock_gateway, mock_render_control
     ):
         """验证流的 CRUD 操作"""
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         # Create
@@ -138,13 +138,13 @@ class TestStreamManagementAPI:
 
     @pytest.mark.asyncio
     async def test_stream_lifecycle_start_stop(
-        self, test_db: AsyncSession, mock_gateway, mock_inference_control
+        self, test_db: AsyncSession, mock_gateway, mock_render_control
     ):
         """验证流的启动和停止生命周期"""
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         # Create stream
@@ -163,7 +163,7 @@ class TestStreamManagementAPI:
         
         # Verify gateway was called
         mock_gateway.create_rtsp_proxy.assert_called_once()
-        mock_inference_control.send_start.assert_called_once()
+        mock_render_control.send_start.assert_called_once()
         
         # Stop stream
         stopped_stream = await service.stop(stream.id)
@@ -171,18 +171,18 @@ class TestStreamManagementAPI:
         assert stopped_stream.play_url is None
         
         # Verify stop was called
-        mock_inference_control.send_stop.assert_called_once()
+        mock_render_control.send_stop.assert_called_once()
         mock_gateway.delete_stream.assert_called()
 
     @pytest.mark.asyncio
     async def test_all_stream_types_supported(
-        self, test_db: AsyncSession, mock_gateway, mock_inference_control
+        self, test_db: AsyncSession, mock_gateway, mock_render_control
     ):
         """验证所有流类型都能正常创建"""
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         # FILE type
@@ -401,9 +401,9 @@ class TestServiceIntegration:
             StreamService,
             get_stream_service,
         )
-        from app.services.inference_control import (
-            InferenceControlService,
-            get_inference_control,
+        from app.services.render_control import (
+            RenderControlService,
+            get_render_control,
         )
         
         # All imports successful
@@ -412,7 +412,7 @@ class TestServiceIntegration:
         assert GatewayAdapter is not None
         assert ZLMediaKitAdapter is not None
         assert StreamService is not None
-        assert InferenceControlService is not None
+        assert RenderControlService is not None
 
     def test_singleton_services(self):
         """验证单例服务"""
@@ -635,7 +635,7 @@ class TestStreamServiceErrorHandling:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference
+            render_control=mock_inference
         )
         
         # Create stream
@@ -675,7 +675,7 @@ class TestStreamServiceErrorHandling:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference
+            render_control=mock_inference
         )
         
         # Create and start stream
@@ -694,8 +694,8 @@ class TestStreamServiceErrorHandling:
         assert stopped_stream.play_url is None
 
     @pytest.mark.asyncio
-    async def test_stop_succeeds_even_if_inference_control_fails(self, test_db: AsyncSession):
-        """验证推理控制失败时停止操作仍然成功"""
+    async def test_stop_succeeds_even_if_render_control_fails(self, test_db: AsyncSession):
+        """验证渲染控制失败时停止操作仍然成功"""
         mock_gateway = AsyncMock(spec=GatewayAdapter)
         mock_gateway.create_rtsp_proxy = AsyncMock(return_value=StreamInfo(
             stream_id="test",
@@ -710,7 +710,7 @@ class TestStreamServiceErrorHandling:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference
+            render_control=mock_inference
         )
         
         # Create and start stream
@@ -745,7 +745,7 @@ class TestStreamServiceErrorHandling:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference
+            render_control=mock_inference
         )
         
         # Create stream (not started)

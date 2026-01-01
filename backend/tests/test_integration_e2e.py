@@ -94,8 +94,8 @@ class TestEndToEndStreamProcessing:
         return gateway
 
     @pytest.fixture
-    def mock_inference_control(self):
-        """Mock 推理控制服务"""
+    def mock_render_control(self):
+        """Mock 渲染控制服务"""
         control = AsyncMock()
         control.send_start = AsyncMock(return_value="cmd_start_123")
         control.send_stop = AsyncMock(return_value="cmd_stop_456")
@@ -103,7 +103,7 @@ class TestEndToEndStreamProcessing:
 
     @pytest.mark.asyncio
     async def test_complete_rtsp_stream_lifecycle(
-        self, test_db: AsyncSession, mock_gateway, mock_inference_control
+        self, test_db: AsyncSession, mock_gateway, mock_render_control
     ):
         """测试 RTSP 流的完整生命周期
         
@@ -113,7 +113,7 @@ class TestEndToEndStreamProcessing:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         # 1. 创建流
@@ -135,9 +135,9 @@ class TestEndToEndStreamProcessing:
         assert started_stream.play_url is not None
         assert "gateway" in started_stream.play_url
         
-        # 验证网关和推理控制被调用
+        # 验证网关和渲染控制被调用
         mock_gateway.create_rtsp_proxy.assert_called_once()
-        mock_inference_control.send_start.assert_called_once()
+        mock_render_control.send_start.assert_called_once()
         
         # 3. 停止流
         stopped_stream = await service.stop(stream.id)
@@ -145,7 +145,7 @@ class TestEndToEndStreamProcessing:
         assert stopped_stream.status == StreamStatus.STOPPED
         assert stopped_stream.play_url is None
         
-        mock_inference_control.send_stop.assert_called_once()
+        mock_render_control.send_stop.assert_called_once()
         mock_gateway.delete_stream.assert_called()
         
         # 4. 删除流
@@ -158,7 +158,7 @@ class TestEndToEndStreamProcessing:
 
     @pytest.mark.asyncio
     async def test_complete_webcam_stream_lifecycle(
-        self, test_db: AsyncSession, mock_gateway, mock_inference_control
+        self, test_db: AsyncSession, mock_gateway, mock_render_control
     ):
         """测试 WEBCAM 流的完整生命周期
         
@@ -168,7 +168,7 @@ class TestEndToEndStreamProcessing:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         # 1. 创建流
@@ -202,7 +202,7 @@ class TestEndToEndStreamProcessing:
 
     @pytest.mark.asyncio
     async def test_stream_state_transitions(
-        self, test_db: AsyncSession, mock_gateway, mock_inference_control
+        self, test_db: AsyncSession, mock_gateway, mock_render_control
     ):
         """测试流状态转换的正确性
         
@@ -212,7 +212,7 @@ class TestEndToEndStreamProcessing:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         # 创建流
@@ -243,7 +243,7 @@ class TestEndToEndStreamProcessing:
 
     @pytest.mark.asyncio
     async def test_invalid_state_transitions_rejected(
-        self, test_db: AsyncSession, mock_gateway, mock_inference_control
+        self, test_db: AsyncSession, mock_gateway, mock_render_control
     ):
         """测试无效状态转换被拒绝
         
@@ -254,7 +254,7 @@ class TestEndToEndStreamProcessing:
         service = StreamService(
             db=test_db,
             gateway=mock_gateway,
-            inference_control=mock_inference_control
+            render_control=mock_render_control
         )
         
         # 创建流
