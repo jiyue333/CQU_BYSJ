@@ -101,11 +101,11 @@ deploy_prod() {
     info "生产模式启动完成！"
     echo ""
     echo "服务架构："
-    echo "  - frontend:  Vue 3 前端应用"
-    echo "  - backend:   FastAPI API 服务"
-    echo "  - inference: YOLO 推理服务（独立运行）"
-    echo "  - postgres:  PostgreSQL 数据库"
-    echo "  - redis:     Redis 消息队列"
+    echo "  - frontend:   Vue 3 前端应用"
+    echo "  - backend:    FastAPI API 服务"
+    echo "  - render:     渲染服务（拉流→YOLO推理→热力图叠加→推流）"
+    echo "  - postgres:   PostgreSQL 数据库"
+    echo "  - redis:      Redis 消息队列"
     echo "  - zlmediakit: 流媒体网关"
     echo ""
     echo "访问地址："
@@ -114,8 +114,8 @@ deploy_prod() {
     echo "  - API 文档: http://localhost:8000/docs"
     echo "  - ZLMediaKit: http://localhost:8080"
     echo ""
-    echo "扩展推理服务："
-    echo "  $COMPOSE_CMD -f docker-compose.prod.yml up -d --scale inference=3"
+    echo "扩展渲染服务："
+    echo "  $COMPOSE_CMD -f docker-compose.prod.yml up -d --scale render=3"
 }
 
 # 停止服务

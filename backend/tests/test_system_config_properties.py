@@ -275,13 +275,21 @@ class TestDefaultValues:
         assert config.confidence_threshold == 0.5
         assert config.inference_fps == 2
         assert config.heatmap_grid_size == 20
-        assert config.heatmap_decay == 0.3
+        assert config.heatmap_decay == 0.5
+        # 方案 F 渲染配置默认值
+        assert config.render_fps == 24
+        assert config.render_infer_stride == 3
+        assert config.render_overlay_alpha == 0.4
         
         # 验证默认值在有效范围内
         assert 0.0 <= config.confidence_threshold <= 1.0
         assert 1 <= config.inference_fps <= 3
         assert 5 <= config.heatmap_grid_size <= 100
         assert 0.0 <= config.heatmap_decay <= 1.0
+        # 方案 F 渲染配置范围
+        assert 1 <= config.render_fps <= 60
+        assert 1 <= config.render_infer_stride <= 10
+        assert 0.0 <= config.render_overlay_alpha <= 1.0
 
     def test_default_values_preserved_after_serialization(self):
         """Property: 默认值在序列化后应保持不变

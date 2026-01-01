@@ -12,6 +12,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",  # 忽略额外的环境变量
     )
 
     # 应用配置
@@ -30,6 +31,11 @@ class Settings(BaseSettings):
     stream_read_block_ms: int = 1000  # 阻塞读取超时（毫秒）
     stream_read_count: int = 100  # 每次读取最大消息数
     stream_recover_count: int = 50  # 断点续传最大恢复消息数
+    
+    # 渲染状态 Stream 配置（方案 F）
+    render_status_maxlen: int = 1000  # 渲染状态 Stream 最大长度
+    render_latest_result_ttl: int = 60  # latest_result key TTL（秒）
+    render_cleanup_on_stop: bool = True  # 停止时是否清理缓存
 
     # ZLMediaKit 配置
     zlm_base_url: str = "http://localhost:8080"  # 内部访问地址（容器间通信）

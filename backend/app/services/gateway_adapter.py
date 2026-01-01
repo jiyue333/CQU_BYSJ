@@ -176,8 +176,20 @@ class ZLMediaKitAdapter(GatewayAdapter):
         return f"{stream_id}_heatmap"
 
     def build_internal_rtsp_url(self, stream_id: str) -> str:
-        """容器内 RTSP 拉流地址（从 ZLM_BASE_URL host 推导）。"""
+        """容器内 RTSP 拉流地址（从 ZLM_BASE_URL host 推导）。
+        
+        注意：ZLM 的 RTSP URL 解析会把 hostname 当作 vhost，
+        如果 hostname 不是 IP 地址，可能导致 "no such stream" 错误。
+        建议使用 build_internal_flv_url() 替代。
+        """
         return f"rtsp://{self.internal_host}:{self.rtsp_port}/{self.app}/{stream_id}"
+
+    def build_internal_flv_url(self, stream_id: str) -> str:
+        """容器内 HTTP-FLV 拉流地址（从 ZLM_BASE_URL 推导）。
+        
+        HTTP-FLV 不涉及 vhost 解析问题，更适合容器间通信。
+        """
+        return f"{self.base_url}/{self.app}/{stream_id}.live.flv"
 
     def build_internal_rtmp_url(self, stream_id: str) -> str:
         """容器内 RTMP 推流地址（从 ZLM_BASE_URL host 推导）。"""
@@ -212,7 +224,8 @@ class ZLMediaKitAdapter(GatewayAdapter):
         await self._call_api("/index/api/addFFmpegSource", {
             "vhost": self.vhost, "app": self.app, "stream": stream_id,
             "src_url": file_path, "dst_url": dst_url, "timeout_ms": 10000,
-            "enable_hls": 1, "enable_mp4": 0, "ffmpeg_cmd_key": ffmpeg_cmd_key.strip(),
+            "enable_hls": 1, "enable_mp4": 0, "enable_rtsp": 1, "enable_rtmp": 1,
+            "ffmpeg_cmd_key": ffmpeg_cmd_key.strip(),
         })
         return self._build_play_urls(stream_id)
     

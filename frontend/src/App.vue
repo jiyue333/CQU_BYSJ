@@ -27,9 +27,6 @@ const playbackDelaySec = ref(0)
 const showDeleteConfirm = ref(false)
 const streamToDelete = ref<string | null>(null)
 
-// 视频容器引用
-const videoContainerRef = ref<HTMLDivElement | null>(null)
-
 // 计算属性
 const selectedStream = computed<VideoStream | undefined>(() => {
   if (!selectedStreamId.value) return undefined
@@ -351,10 +348,9 @@ function canStop(status: StreamStatus): boolean {
     <main class="main-content">
       <!-- 视频播放区 -->
       <div class="video-section">
-        <div ref="videoContainerRef" class="video-container">
+        <div class="video-container">
           <template v-if="selectedStream">
             <VideoPlayer
-              ref="videoPlayerRef"
               :play-url="selectedStream.play_url"
               :webrtc-url="selectedStream.webrtc_url"
               :stream-id="selectedStream.stream_id"

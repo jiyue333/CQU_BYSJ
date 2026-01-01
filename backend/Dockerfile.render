@@ -33,11 +33,11 @@ WORKDIR /app
 
 # 安装运行时依赖
 # - ffmpeg: 拉流解码 + 编码推流
-# - libgl1-mesa-glx: OpenCV 运行依赖
+# - libgl1: OpenCV 运行依赖 (替代已废弃的 libgl1-mesa-glx)
 # - procps: 健康检查用 pgrep
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \

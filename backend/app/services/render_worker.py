@@ -498,13 +498,21 @@ class RenderWorker:
     ) -> subprocess.Popen:
         """创建 ffmpeg 拉流解码进程
         
+        支持 HTTP-FLV 和 RTSP 输入。
         使用 -vf scale 确保输出分辨率一致，避免源流分辨率不匹配问题。
         stderr 设为 DEVNULL 避免管道阻塞。
         """
+        # 根据 URL 协议选择不同的输入参数
+        if src_url.startswith("rtsp://"):
+            # RTSP 协议需要指定传输方式
+            input_args = ["-rtsp_transport", "tcp", "-i", src_url]
+        else:
+            # HTTP-FLV 等其他协议
+            input_args = ["-i", src_url]
+        
         cmd = [
             "ffmpeg",
-            "-rtsp_transport", "tcp",
-            "-i", src_url,
+            *input_args,
             "-f", "rawvideo",
             "-pix_fmt", "bgr24",
             "-vf", f"scale={width}:{height}",  # 使用 scale filter 确保分辨率一致
@@ -690,9 +698,9 @@ class RenderWorker:
                 approximate=True,
             )
             
-            # 写入 latest_result（供 API 查询）
+            # 写入 latest_result（供 API 查询），使用配置的 TTL
             latest_key = f"{self.LATEST_RESULT_PREFIX}{stream_id}"
-            await client.set(latest_key, result_json, ex=60)
+            await client.set(latest_key, result_json, ex=settings.render_latest_result_ttl)
             
         except Exception as e:
             logger.error("publish_result_failed", stream_id=stream_id, error=str(e))
