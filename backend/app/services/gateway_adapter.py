@@ -104,23 +104,38 @@ class GatewayAdapter(ABC):
 
 class ZLMediaKitAdapter(GatewayAdapter):
     """ZLMediaKit adapter implementation."""
+
+    @staticmethod
+    def _derive_hostname(url: str) -> str:
+        """从 URL 提取 hostname，支持无 scheme 的 fallback。"""
+        parsed = urlparse(url)
+        if parsed.hostname:
+            return parsed.hostname
+        # fallback: 尝试加 http:// 再解析
+        parsed = urlparse(f"http://{url}")
+        return parsed.hostname or "localhost"
     
     def __init__(
         self, 
         base_url: str = settings.zlm_base_url,
         external_url: str = settings.zlm_external_url,
         secret: str = settings.zlm_secret,
-        rtsp_port: int = settings.zlm_rtsp_port
+        rtsp_port: int = settings.zlm_rtsp_port,
+        rtmp_port: int = settings.zlm_rtmp_port
     ):
         self.base_url = base_url.rstrip("/")  # 内部访问地址（API 调用）
         self.external_url = external_url.rstrip("/")  # 外部访问地址（播放地址）
         self.secret = secret
         self.rtsp_port = rtsp_port
+        self.rtmp_port = rtmp_port
         self.app = "live"
         self.vhost = "__defaultVhost__"
-        parsed = urlparse(self.external_url)
-        self.host = parsed.hostname or "localhost"
-        logger.info(f"ZLMediaKitAdapter initialized: base_url={self.base_url}, external_url={self.external_url}")
+        self.host = self._derive_hostname(self.external_url)
+        self.internal_host = self._derive_hostname(self.base_url)  # 从 ZLM_BASE_URL 推导（容器内拉/推用）
+        logger.info(
+            f"ZLMediaKitAdapter initialized: base_url={self.base_url}, "
+            f"external_url={self.external_url}, internal_host={self.internal_host}"
+        )
     
     async def _call_api(self, path: str, params: dict, timeout: float = 10.0) -> dict:
         """Call ZLMediaKit API."""
@@ -156,6 +171,17 @@ class ZLMediaKitAdapter(GatewayAdapter):
             webrtc_url=f"{self.external_url}/index/api/webrtc?app={self.app}&stream={stream_id}&type=play"
         )
 
+    def build_render_stream_id(self, stream_id: str) -> str:
+        """渲染流命名规则（方案F）：{stream_id}_heatmap"""
+        return f"{stream_id}_heatmap"
+
+    def build_internal_rtsp_url(self, stream_id: str) -> str:
+        """容器内 RTSP 拉流地址（从 ZLM_BASE_URL host 推导）。"""
+        return f"rtsp://{self.internal_host}:{self.rtsp_port}/{self.app}/{stream_id}"
+
+    def build_internal_rtmp_url(self, stream_id: str) -> str:
+        """容器内 RTMP 推流地址（从 ZLM_BASE_URL host 推导）。"""
+        return f"rtmp://{self.internal_host}:{self.rtmp_port}/{self.app}/{stream_id}"
 
     async def create_rtsp_proxy(
         self, stream_id: str, rtsp_url: str,

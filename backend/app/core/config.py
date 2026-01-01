@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     zlm_external_url: str = "http://localhost:8080"  # 外部访问地址（浏览器访问）
     zlm_secret: str = ""
     zlm_rtsp_port: int = 554
+    zlm_rtmp_port: int = 1935
     zlm_http_port: int = 80
 
     # CORS 配置
@@ -62,6 +63,15 @@ class Settings(BaseSettings):
     confidence_threshold: float = 0.5
     heatmap_grid_size: int = 20
     heatmap_decay: float = 0.5  # EMA 平滑因子，提高到 0.5 加快衰减
+
+    # 渲染配置（方案F：服务端渲染热力图，MVP 阶段仅 env）
+    # 决策锁定：延迟 1-5s / 渲染 24fps / 推理 8fps；同步模式：严格对齐（推理帧同帧叠加，其余帧复用缓存 heatmap）
+    render_fps: int = 24  # 渲染输出帧率
+    render_infer_stride: int = 3  # 每 N 帧推理一次（24/3=8fps）
+    render_overlay_alpha: float = 0.4  # 热力图叠加透明度
+    render_max_concurrent: int = 2  # 最大并发渲染数
+    render_ffmpeg_preset: str = "ultrafast"
+    render_ffmpeg_tune: str = "zerolatency"
 
     # getSnap 配置
     snap_timeout_sec: float = 2.0
