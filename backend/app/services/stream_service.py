@@ -32,9 +32,9 @@ from app.services.gateway_adapter import (
     StreamInfo,
     get_gateway_adapter,
 )
-from app.services.inference_control import (
-    InferenceControlService,
-    get_inference_control,
+from app.services.render_control import (
+    RenderControlService,
+    get_render_control,
 )
 
 logger = structlog.get_logger(__name__)
@@ -72,12 +72,12 @@ class StreamService:
         self,
         db: AsyncSession,
         gateway: Optional[GatewayAdapter] = None,
-        inference_control: Optional[InferenceControlService] = None,
+        render_control: Optional[RenderControlService] = None,
         file_storage = None
     ):
         self.db = db
         self.gateway = gateway or get_gateway_adapter()
-        self.inference_control = inference_control or get_inference_control()
+        self.render_control = render_control or get_render_control()
         self.file_storage = file_storage or get_file_storage_service()
     
     async def get_running_count(self) -> int:
@@ -274,25 +274,34 @@ class StreamService:
                 gateway_created = True
             
             if stream_info:
-                stream.play_url = stream_info.play_url
+                # 方案 F：play_url 直接返回渲染流地址
+                render_stream_id = self.gateway.build_render_stream_id(stream_id)
+                stream.play_url = self.gateway._build_play_urls(render_stream_id).play_url
             
             # 更新状态为 RUNNING
             stream.status = StreamStatus.RUNNING
             await self.db.flush()
             
-            # 如果启用推理，发送 START 指令
+            # 方案 F：默认启动渲染服务（替代原 inference_control）
             if options.enable_infer:
                 try:
-                    await self.inference_control.send_start(
+                    # 构建容器内拉流/推流地址
+                    src_rtsp_url = self.gateway.build_internal_rtsp_url(stream_id)
+                    render_stream_id = self.gateway.build_render_stream_id(stream_id)
+                    dst_rtmp_url = self.gateway.build_internal_rtmp_url(render_stream_id)
+                    
+                    await self.render_control.send_start(
                         stream_id=stream_id,
-                        fps=settings.inference_fps
+                        src_rtsp_url=src_rtsp_url,
+                        dst_rtmp_url=dst_rtmp_url,
+                        render_stream_id=render_stream_id,
                     )
-                except Exception as infer_err:
-                    # 推理服务启动失败，回滚网关资源
+                except Exception as render_err:
+                    # 渲染服务启动失败，回滚网关资源
                     logger.error(
-                        "inference_start_failed",
+                        "render_start_failed",
                         stream_id=stream_id,
-                        error=str(infer_err)
+                        error=str(render_err)
                     )
                     if gateway_created:
                         try:
@@ -302,7 +311,7 @@ class StreamService:
                     stream.status = StreamStatus.ERROR
                     stream.play_url = None
                     await self.db.flush()
-                    raise GatewayError(f"Failed to start inference: {infer_err}") from infer_err
+                    raise GatewayError(f"Failed to start render: {render_err}") from render_err
             
             logger.info(
                 "stream_started",
@@ -370,18 +379,29 @@ class StreamService:
         
         logger.info("stream_stopping", stream_id=stream_id)
         
-        # 发送 STOP 指令（无论 enable_infer 设置，强制停止推理）
-        # Best effort - don't fail if inference control fails
+        # 方案 F：发送渲染 STOP 指令
+        # Best effort - don't fail if render control fails
         try:
-            await self.inference_control.send_stop(stream_id=stream_id)
+            await self.render_control.send_stop(stream_id=stream_id)
         except Exception as e:
             logger.warning(
-                "inference_stop_failed",
+                "render_stop_failed",
                 stream_id=stream_id,
                 error=str(e)
             )
         
-        # 删除网关中的流
+        # 删除渲染流（best effort）
+        try:
+            render_stream_id = self.gateway.build_render_stream_id(stream_id)
+            await self.gateway.delete_stream(render_stream_id)
+        except Exception as e:
+            logger.warning(
+                "render_stream_delete_failed",
+                stream_id=stream_id,
+                error=str(e)
+            )
+        
+        # 删除网关中的原始流
         # Best effort - don't fail if gateway fails
         try:
             await self.gateway.delete_stream(stream_id)
