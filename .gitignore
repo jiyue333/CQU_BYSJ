@@ -34,7 +34,8 @@ venv.bak/
 # IDE
 .idea/
 .vscode/
-.kiro/
+.kiro/settings
+.kiro/steering
 *.swp
 *.swo
 *~
