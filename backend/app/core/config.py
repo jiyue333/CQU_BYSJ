@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     inference_fps: int = 2
     confidence_threshold: float = 0.5
     heatmap_grid_size: int = 20
-    heatmap_decay: float = 0.3
+    heatmap_decay: float = 0.5  # EMA 平滑因子，提高到 0.5 加快衰减
 
     # getSnap 配置
     snap_timeout_sec: float = 2.0

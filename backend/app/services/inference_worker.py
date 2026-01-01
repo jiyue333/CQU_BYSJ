@@ -338,6 +338,8 @@ class InferenceWorker:
                     await self._handle_failure(stream_id, "snapshot_failed")
                     continue
                 
+                capture_ts = time.time()
+                
                 # 推理（返回检测结果和图像尺寸，避免重复解码）
                 result_data = await self._run_inference_with_size(stream_id, snapshot)
                 
@@ -362,8 +364,11 @@ class InferenceWorker:
                 # 构建结果
                 result = DetectionResult(
                     stream_id=stream_id,
+                    capture_ts=capture_ts,
                     timestamp=time.time(),
                     total_count=len(detections),
+                    frame_width=frame_width,
+                    frame_height=frame_height,
                     detections=detections,
                     heatmap_grid=heatmap_grid,
                     region_stats=region_stats,

@@ -15,6 +15,7 @@ const props = defineProps<{
   webrtcUrl?: string | null
   streamId: string
   status?: string
+  playbackDelaySec?: number
 }>()
 
 const emit = defineEmits<{
@@ -35,6 +36,10 @@ const isBuffering = ref(false)
 let flvPlayer: flvjs.Player | null = null
 let hlsPlayer: Hls | null = null
 let rtcConnection: RTCPeerConnection | null = null
+let delayTimer: ReturnType<typeof setInterval> | null = null
+
+const DELAY_CHECK_INTERVAL_MS = 200
+const MIN_DELAY_MARGIN_SEC = 0.15
 
 // Playback token to prevent race conditions
 let playbackToken = 0
@@ -138,6 +143,11 @@ function cleanup() {
     rtcConnection.close()
     rtcConnection = null
   }
+  
+  if (delayTimer) {
+    clearInterval(delayTimer)
+    delayTimer = null
+  }
 
   if (videoRef.value) {
     videoRef.value.srcObject = null
@@ -164,6 +174,54 @@ function setupBufferingListeners() {
   videoRef.value.addEventListener('canplay', () => {
     isBuffering.value = false
   })
+}
+
+function getBufferedEnd(video: HTMLVideoElement): number {
+  const buffered = video.buffered
+  if (!buffered || buffered.length === 0) return 0
+  return buffered.end(buffered.length - 1)
+}
+
+function startDelayControl(video: HTMLVideoElement, delaySec: number) {
+  if (delayTimer) {
+    clearInterval(delayTimer)
+    delayTimer = null
+  }
+  
+  if (!delaySec || delaySec <= 0) return
+  
+  const margin = Math.max(MIN_DELAY_MARGIN_SEC, Math.min(delaySec * 0.25, 0.4))
+  
+  delayTimer = setInterval(() => {
+    if (video.readyState < 2) return
+    const bufferedEnd = getBufferedEnd(video)
+    if (!Number.isFinite(bufferedEnd) || bufferedEnd <= 0) return
+    
+    const latency = bufferedEnd - video.currentTime
+    if (!Number.isFinite(latency)) return
+    
+    if (latency < delaySec - margin) {
+      if (!video.paused) {
+        video.pause()
+      }
+      return
+    }
+    
+    if (latency > delaySec + margin * 2) {
+      const target = bufferedEnd - delaySec
+      if (target > 0 && Math.abs(video.currentTime - target) > margin) {
+        try {
+          video.currentTime = target
+        } catch {
+          // Ignore seek errors
+        }
+      }
+    }
+    
+    if (video.paused) {
+      video.play().catch(() => {})
+    }
+  }, DELAY_CHECK_INTERVAL_MS)
 }
 
 // 尝试 WebRTC 播放 (WHEP 协议)
@@ -523,7 +581,7 @@ async function startPlayback() {
   // WebRTC 延迟最低，适合实时监控
   
   // 1. 尝试 WebRTC (最低延迟)
-  if (urls.value?.webrtc) {
+  if (urls.value?.webrtc && !(props.playbackDelaySec && props.playbackDelaySec > 0)) {
     console.log('Trying WebRTC first (lowest latency)...')
     if (await tryWebRTC(token)) {
       return
@@ -538,6 +596,9 @@ async function startPlayback() {
   // 2. 尝试 HTTP-FLV (低延迟)
   console.log('Trying HTTP-FLV...')
   if (await tryFlv(token)) {
+    if (videoRef.value) {
+      startDelayControl(videoRef.value, props.playbackDelaySec ?? 0)
+    }
     return
   }
   // 清理失败的 FLV 播放器
@@ -549,6 +610,9 @@ async function startPlayback() {
   // 3. 降级到 HLS (兼容性最好)
   console.log('Trying HLS...')
   if (await tryHls(token)) {
+    if (videoRef.value) {
+      startDelayControl(videoRef.value, props.playbackDelaySec ?? 0)
+    }
     return
   }
 

@@ -34,6 +34,7 @@ export interface VideoStream {
   type: StreamType
   status: StreamStatus
   play_url: string | null
+  webrtc_url: string | null
   source_url: string | null
   file_id: string | null
   publish_info: PublishInfo | null
@@ -81,8 +82,11 @@ export interface RegionStat {
 // 完整检测结果
 export interface DetectionResult {
   stream_id: string
+  capture_ts?: number
   timestamp: number
   total_count: number
+  frame_width: number
+  frame_height: number
   detections: Detection[]
   heatmap_grid: number[][]
   region_stats: RegionStat[]

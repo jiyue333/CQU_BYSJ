@@ -5,23 +5,54 @@
  * Requirements: 4.2, 4.3, 4.4, 4.5
  */
 
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, computed } from 'vue'
 
 const props = defineProps<{
   heatmapGrid: number[][] | null
   visible: boolean
   width: number
   height: number
+  videoAspectRatio?: number  // 视频宽高比，用于计算实际显示区域
 }>()
 
-// EMA 平滑参数
-const EMA_ALPHA = 0.3
+// EMA 平滑参数（1 表示不做前端平滑，只展示后端热力图）
+const EMA_ALPHA = 1
 
 // Canvas 引用
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 
 // EMA 平滑后的热力图数据
 const smoothedGrid = ref<number[][] | null>(null)
+
+// 计算视频实际显示区域（考虑 object-fit: contain 的黑边）
+const videoDisplayArea = computed(() => {
+  const containerWidth = props.width
+  const containerHeight = props.height
+  const videoRatio = props.videoAspectRatio || 16 / 9  // 默认 16:9
+  
+  const containerRatio = containerWidth / containerHeight
+  
+  let displayWidth: number
+  let displayHeight: number
+  let offsetX: number
+  let offsetY: number
+  
+  if (containerRatio > videoRatio) {
+    // 容器更宽，视频左右有黑边
+    displayHeight = containerHeight
+    displayWidth = containerHeight * videoRatio
+    offsetX = (containerWidth - displayWidth) / 2
+    offsetY = 0
+  } else {
+    // 容器更高，视频上下有黑边
+    displayWidth = containerWidth
+    displayHeight = containerWidth / videoRatio
+    offsetX = 0
+    offsetY = (containerHeight - displayHeight) / 2
+  }
+  
+  return { displayWidth, displayHeight, offsetX, offsetY }
+})
 
 // 颜色映射：值 (0-1) → 颜色
 function valueToColor(value: number): string {
@@ -82,11 +113,14 @@ function render() {
   // 清空画布
   ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-  // 计算每个格子的大小
-  const cellWidth = canvas.width / cols
-  const cellHeight = canvas.height / rows
+  // 获取视频实际显示区域
+  const { displayWidth, displayHeight, offsetX, offsetY } = videoDisplayArea.value
 
-  // 绘制热力图
+  // 计算每个格子的大小（基于视频实际显示区域）
+  const cellWidth = displayWidth / cols
+  const cellHeight = displayHeight / rows
+
+  // 绘制热力图（偏移到视频实际显示区域）
   for (let i = 0; i < rows; i++) {
     const row = grid[i]
     if (!row) continue
@@ -95,7 +129,12 @@ function render() {
       if (value !== undefined && value > 0.01) {
         // 忽略极小值
         ctx.fillStyle = valueToColor(value)
-        ctx.fillRect(j * cellWidth, i * cellHeight, cellWidth, cellHeight)
+        ctx.fillRect(
+          offsetX + j * cellWidth, 
+          offsetY + i * cellHeight, 
+          cellWidth, 
+          cellHeight
+        )
       }
     }
   }

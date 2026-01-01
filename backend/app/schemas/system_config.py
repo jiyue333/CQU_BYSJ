@@ -29,10 +29,10 @@ class SystemConfigBase(BaseModel):
         description="热力图网格大小 (5-100)"
     )
     heatmap_decay: float = Field(
-        0.3, 
+        0.5, 
         ge=0.0, 
         le=1.0, 
-        description="热力图衰减因子（EMA alpha, 0-1）"
+        description="热力图衰减因子（EMA alpha, 0-1，值越大衰减越快）"
     )
 
     @field_validator("inference_fps")

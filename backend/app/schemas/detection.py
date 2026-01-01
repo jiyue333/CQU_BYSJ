@@ -63,8 +63,13 @@ class DetectionResult(BaseModel):
     包含一帧图像的所有检测信息，通过 Redis Streams 推送给前端。
     """
     stream_id: str = Field(..., description="视频流 ID")
-    timestamp: float = Field(..., description="检测时间戳（epoch）")
+    capture_ts: Optional[float] = Field(
+        None, description="快照采集时间戳（epoch）"
+    )
+    timestamp: float = Field(..., description="检测完成时间戳（epoch）")
     total_count: int = Field(..., ge=0, description="总人数")
+    frame_width: int = Field(default=1920, ge=1, description="帧宽度（像素）")
+    frame_height: int = Field(default=1080, ge=1, description="帧高度（像素）")
     detections: list[Detection] = Field(default_factory=list, description="检测框列表")
     heatmap_grid: list[list[float]] = Field(
         default_factory=list, 

@@ -188,6 +188,21 @@ class StatusPushService:
         except json.JSONDecodeError:
             logger.warning(f"Invalid JSON status data: {data[:100]}")
             parsed_data = {"raw": data}
+
+        # Normalize inference events to stream status updates for frontend
+        if isinstance(parsed_data, dict) and "status" not in parsed_data:
+            event = parsed_data.get("event")
+            if event:
+                event_map = {
+                    "STARTED": "running",
+                    "STOPPED": "stopped",
+                    "COOLDOWN": "cooldown",
+                }
+                mapped_status = event_map.get(event)
+                if not mapped_status:
+                    # Ignore non-status events (e.g. HEALTH_UPDATE)
+                    return
+                parsed_data["status"] = mapped_status
         
         message = json.dumps({
             "type": "status",

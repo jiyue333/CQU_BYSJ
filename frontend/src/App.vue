@@ -23,6 +23,7 @@ const selectedStreamId = ref<string | null>(null)
 
 // 热力图显示开关
 const showHeatmap = ref(true)
+const playbackDelaySec = ref(0)  // 设为 0 避免热力图与视频不同步
 
 // 删除确认对话框
 const showDeleteConfirm = ref(false)
@@ -39,13 +40,25 @@ const selectedStream = computed<VideoStream | undefined>(() => {
   return store.streams.get(selectedStreamId.value)
 })
 
-const currentResult = computed<DetectionResult | null>(() => {
+const latestResult = computed<DetectionResult | null>(() => {
   if (!selectedStreamId.value) return null
   return store.getDetectionResult(selectedStreamId.value) ?? null
 })
 
+// 简化：直接使用最新结果，不做时间对齐（避免延迟问题）
+const displayResult = computed<DetectionResult | null>(() => latestResult.value)
+
 const heatmapGrid = computed(() => {
-  return currentResult.value?.heatmap_grid || null
+  return displayResult.value?.heatmap_grid || null
+})
+
+// 从检测结果获取视频宽高比
+const videoAspectRatio = computed(() => {
+  const result = displayResult.value
+  if (!result || !result.frame_width || !result.frame_height) {
+    return 16 / 9  // 默认 16:9
+  }
+  return result.frame_width / result.frame_height
 })
 
 // 连接状态
@@ -371,15 +384,19 @@ function canStop(status: StreamStatus): boolean {
         <div ref="videoContainerRef" class="video-container">
           <template v-if="selectedStream">
             <VideoPlayer
+              ref="videoPlayerRef"
               :play-url="selectedStream.play_url"
+              :webrtc-url="selectedStream.webrtc_url"
               :stream-id="selectedStream.stream_id"
               :status="selectedStream.status"
+              :playback-delay-sec="playbackDelaySec"
             />
             <HeatmapOverlay
               :heatmap-grid="heatmapGrid"
               :visible="showHeatmap"
               :width="videoWidth"
               :height="videoHeight"
+              :video-aspect-ratio="videoAspectRatio"
             />
           </template>
           <div v-else class="no-stream">
@@ -432,7 +449,7 @@ function canStop(status: StreamStatus): boolean {
       </div>
 
       <!-- 实时统计面板 -->
-      <StatsPanel :result="currentResult" />
+      <StatsPanel :result="displayResult" />
     </main>
 
     <!-- 删除确认对话框 -->
