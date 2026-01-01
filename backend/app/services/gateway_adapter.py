@@ -171,6 +171,13 @@ class ZLMediaKitAdapter(GatewayAdapter):
             webrtc_url=f"{self.external_url}/index/api/webrtc?app={self.app}&stream={stream_id}&type=play"
         )
 
+    def _with_vhost_param(self, url: str) -> str:
+        """Append vhost query param for protocols that use host as vhost."""
+        if not self.vhost:
+            return url
+        separator = "&" if "?" in url else "?"
+        return f"{url}{separator}vhost={self.vhost}"
+
     def build_render_stream_id(self, stream_id: str) -> str:
         """渲染流命名规则（方案F）：{stream_id}_heatmap"""
         return f"{stream_id}_heatmap"
@@ -182,7 +189,8 @@ class ZLMediaKitAdapter(GatewayAdapter):
         如果 hostname 不是 IP 地址，可能导致 "no such stream" 错误。
         建议使用 build_internal_flv_url() 替代。
         """
-        return f"rtsp://{self.internal_host}:{self.rtsp_port}/{self.app}/{stream_id}"
+        url = f"rtsp://{self.internal_host}:{self.rtsp_port}/{self.app}/{stream_id}"
+        return self._with_vhost_param(url)
 
     def build_internal_flv_url(self, stream_id: str) -> str:
         """容器内 HTTP-FLV 拉流地址（从 ZLM_BASE_URL 推导）。
@@ -193,7 +201,8 @@ class ZLMediaKitAdapter(GatewayAdapter):
 
     def build_internal_rtmp_url(self, stream_id: str) -> str:
         """容器内 RTMP 推流地址（从 ZLM_BASE_URL host 推导）。"""
-        return f"rtmp://{self.internal_host}:{self.rtmp_port}/{self.app}/{stream_id}"
+        url = f"rtmp://{self.internal_host}:{self.rtmp_port}/{self.app}/{stream_id}"
+        return self._with_vhost_param(url)
 
     async def create_rtsp_proxy(
         self, stream_id: str, rtsp_url: str,

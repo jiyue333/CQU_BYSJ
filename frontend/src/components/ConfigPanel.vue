@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
  * 配置管理面板组件
- * 提供置信度阈值、密度等级阈值、推理频率等配置
+ * 方案 F：服务端渲染热力图配置
+ * 提供置信度阈值、热力图网格、推理步长、叠加透明度等配置
  * Requirements: 8.1, 8.2, 8.3
  */
 
@@ -24,12 +25,12 @@ const loading = ref(false)
 const saving = ref(false)
 const error = ref<string | null>(null)
 
-// 表单值（用于编辑）
+// 表单值（用于编辑）- 方案 F 配置项
 const formValues = ref({
   confidence_threshold: 0.5,
-  inference_fps: 2,
   heatmap_grid_size: 20,
-  heatmap_decay: 0.3
+  render_infer_stride: 3,
+  render_overlay_alpha: 0.4
 })
 
 // 是否有未保存的更改
@@ -37,10 +38,16 @@ const hasChanges = computed(() => {
   if (!config.value) return false
   return (
     formValues.value.confidence_threshold !== config.value.confidence_threshold ||
-    formValues.value.inference_fps !== config.value.inference_fps ||
     formValues.value.heatmap_grid_size !== config.value.heatmap_grid_size ||
-    formValues.value.heatmap_decay !== config.value.heatmap_decay
+    formValues.value.render_infer_stride !== config.value.render_infer_stride ||
+    formValues.value.render_overlay_alpha !== config.value.render_overlay_alpha
   )
+})
+
+// 计算实际推理帧率（render_fps / render_infer_stride）
+const effectiveInferFps = computed(() => {
+  const renderFps = config.value?.render_fps ?? 24
+  return Math.round(renderFps / formValues.value.render_infer_stride)
 })
 
 // 加载配置
@@ -58,9 +65,9 @@ async function loadConfig() {
     // 同步表单值
     formValues.value = {
       confidence_threshold: config.value.confidence_threshold,
-      inference_fps: config.value.inference_fps,
       heatmap_grid_size: config.value.heatmap_grid_size,
-      heatmap_decay: config.value.heatmap_decay
+      render_infer_stride: config.value.render_infer_stride,
+      render_overlay_alpha: config.value.render_overlay_alpha
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : '加载配置失败'
@@ -84,14 +91,14 @@ async function saveConfig() {
     if (formValues.value.confidence_threshold !== config.value?.confidence_threshold) {
       updateData.confidence_threshold = formValues.value.confidence_threshold
     }
-    if (formValues.value.inference_fps !== config.value?.inference_fps) {
-      updateData.inference_fps = formValues.value.inference_fps
-    }
     if (formValues.value.heatmap_grid_size !== config.value?.heatmap_grid_size) {
       updateData.heatmap_grid_size = formValues.value.heatmap_grid_size
     }
-    if (formValues.value.heatmap_decay !== config.value?.heatmap_decay) {
-      updateData.heatmap_decay = formValues.value.heatmap_decay
+    if (formValues.value.render_infer_stride !== config.value?.render_infer_stride) {
+      updateData.render_infer_stride = formValues.value.render_infer_stride
+    }
+    if (formValues.value.render_overlay_alpha !== config.value?.render_overlay_alpha) {
+      updateData.render_overlay_alpha = formValues.value.render_overlay_alpha
     }
 
     config.value = await updateConfig(props.streamId, updateData)
@@ -109,9 +116,9 @@ async function saveConfig() {
 function resetToDefaults() {
   formValues.value = {
     confidence_threshold: 0.5,
-    inference_fps: 2,
     heatmap_grid_size: 20,
-    heatmap_decay: 0.3
+    render_infer_stride: 3,
+    render_overlay_alpha: 0.4
   }
 }
 
@@ -120,9 +127,9 @@ function cancelChanges() {
   if (config.value) {
     formValues.value = {
       confidence_threshold: config.value.confidence_threshold,
-      inference_fps: config.value.inference_fps,
       heatmap_grid_size: config.value.heatmap_grid_size,
-      heatmap_decay: config.value.heatmap_decay
+      render_infer_stride: config.value.render_infer_stride,
+      render_overlay_alpha: config.value.render_overlay_alpha
     }
   }
 }
@@ -152,6 +159,12 @@ watch(() => props.streamId, loadConfig, { immediate: true })
     </div>
 
     <div v-else class="config-form">
+      <!-- 方案 F 提示 -->
+      <div class="info-banner">
+        <span class="info-icon">ℹ️</span>
+        <span>热力图由服务端渲染，预计延迟 1-5 秒</span>
+      </div>
+
       <!-- 置信度阈值 -->
       <div class="form-group">
         <label>
@@ -178,23 +191,29 @@ watch(() => props.streamId, loadConfig, { immediate: true })
         </div>
       </div>
 
-      <!-- 推理频率 -->
+      <!-- 推理步长 -->
       <div class="form-group">
         <label>
-          <span class="label-text">推理频率 (FPS)</span>
-          <span class="label-hint">每秒推理帧数 (1-3)</span>
+          <span class="label-text">推理步长</span>
+          <span class="label-hint">每 N 帧推理一次 (1-10)，当前约 {{ effectiveInferFps }} FPS</span>
         </label>
         <div class="input-row">
-          <div class="fps-buttons">
-            <button
-              v-for="fps in [1, 2, 3]"
-              :key="fps"
-              :class="['fps-btn', { active: formValues.inference_fps === fps }]"
-              @click="formValues.inference_fps = fps"
-            >
-              {{ fps }} FPS
-            </button>
-          </div>
+          <input
+            v-model.number="formValues.render_infer_stride"
+            type="range"
+            min="1"
+            max="10"
+            step="1"
+            class="slider"
+          />
+          <input
+            v-model.number="formValues.render_infer_stride"
+            type="number"
+            min="1"
+            max="10"
+            step="1"
+            class="number-input"
+          />
         </div>
       </div>
 
@@ -224,15 +243,15 @@ watch(() => props.streamId, loadConfig, { immediate: true })
         </div>
       </div>
 
-      <!-- 热力图衰减因子 -->
+      <!-- 热力图透明度 -->
       <div class="form-group">
         <label>
-          <span class="label-text">热力图平滑因子 (α)</span>
-          <span class="label-hint">EMA 平滑系数，越大越敏感 (0-1)</span>
+          <span class="label-text">热力图透明度</span>
+          <span class="label-hint">叠加透明度 (0-1)，越大越明显</span>
         </label>
         <div class="input-row">
           <input
-            v-model.number="formValues.heatmap_decay"
+            v-model.number="formValues.render_overlay_alpha"
             type="range"
             min="0"
             max="1"
@@ -240,7 +259,7 @@ watch(() => props.streamId, loadConfig, { immediate: true })
             class="slider"
           />
           <input
-            v-model.number="formValues.heatmap_decay"
+            v-model.number="formValues.render_overlay_alpha"
             type="number"
             min="0"
             max="1"
@@ -439,32 +458,20 @@ watch(() => props.streamId, loadConfig, { immediate: true })
   border-color: #4a9eff;
 }
 
-.fps-buttons {
+.info-banner {
   display: flex;
+  align-items: center;
   gap: 8px;
+  padding: 10px 12px;
+  background: rgba(33, 150, 243, 0.1);
+  border: 1px solid rgba(33, 150, 243, 0.3);
+  border-radius: 8px;
+  font-size: 13px;
+  color: #64b5f6;
 }
 
-.fps-btn {
-  flex: 1;
-  padding: 10px 16px;
-  background: #252525;
-  border: 1px solid #333;
-  border-radius: 6px;
-  color: #888;
+.info-icon {
   font-size: 14px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.fps-btn:hover {
-  background: #2a2a2a;
-  border-color: #444;
-}
-
-.fps-btn.active {
-  background: rgba(74, 158, 255, 0.15);
-  border-color: #4a9eff;
-  color: #4a9eff;
 }
 
 .form-actions {

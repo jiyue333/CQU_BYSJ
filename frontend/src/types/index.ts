@@ -143,20 +143,29 @@ export interface ApiError {
   detail: string
 }
 
-// 系统配置
+// 系统配置（方案 F：服务端渲染热力图）
 export interface SystemConfig {
   id: number
   stream_id: string
   confidence_threshold: number
-  inference_fps: number
   heatmap_grid_size: number
-  heatmap_decay: number
+  // 方案 F 渲染配置
+  render_fps: number
+  render_infer_stride: number
+  render_overlay_alpha: number
+  // 已废弃字段（保留向后兼容）
+  /** @deprecated 方案 F 使用 render_infer_stride */
+  inference_fps?: number
+  /** @deprecated 方案 F 无前端 EMA 平滑 */
+  heatmap_decay?: number
 }
 
 // 系统配置更新请求
 export interface SystemConfigUpdate {
   confidence_threshold?: number
-  inference_fps?: number
   heatmap_grid_size?: number
-  heatmap_decay?: number
+  // 方案 F 渲染配置
+  render_fps?: number
+  render_infer_stride?: number
+  render_overlay_alpha?: number
 }

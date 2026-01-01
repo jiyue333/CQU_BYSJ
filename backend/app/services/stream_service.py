@@ -284,14 +284,13 @@ class StreamService:
             # 方案 F：默认启动渲染服务
             try:
                 # 构建容器内拉流/推流地址
-                # 使用 HTTP-FLV 拉流，避免 RTSP vhost 解析问题
-                src_flv_url = self.gateway.build_internal_flv_url(stream_id)
+                src_rtsp_url = self.gateway.build_internal_rtsp_url(stream_id)
                 render_stream_id = self.gateway.build_render_stream_id(stream_id)
                 dst_rtmp_url = self.gateway.build_internal_rtmp_url(render_stream_id)
                 
                 await self.render_control.send_start(
                     stream_id=stream_id,
-                    src_rtsp_url=src_flv_url,  # 参数名保留兼容，实际传 FLV URL
+                    src_rtsp_url=src_rtsp_url,
                     dst_rtmp_url=dst_rtmp_url,
                     render_stream_id=render_stream_id,
                 )
