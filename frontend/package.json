@@ -12,14 +12,18 @@
     "format": "prettier --write src/"
   },
   "dependencies": {
+    "echarts": "^6.0.0",
     "flv.js": "^1.6.2",
     "hls.js": "^1.6.15",
     "pinia": "^3.0.4",
-    "vue": "^3.5.24"
+    "splitpanes": "^4.0.4",
+    "vue": "^3.5.24",
+    "vue-echarts": "^8.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
     "@types/node": "^24.10.1",
+    "@types/splitpanes": "^2.2.6",
     "@typescript-eslint/eslint-plugin": "^8.51.0",
     "@typescript-eslint/parser": "^8.51.0",
     "@vitejs/plugin-vue": "^6.0.1",

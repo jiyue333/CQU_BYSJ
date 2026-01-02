@@ -7,6 +7,8 @@
  */
 
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { Splitpanes, Pane } from 'splitpanes'
+import 'splitpanes/dist/splitpanes.css'
 import VideoSourceSelector from './components/VideoSourceSelector.vue'
 import VideoPlayer from './components/VideoPlayer.vue'
 import DataTabs from './components/DataTabs.vue'
@@ -29,13 +31,57 @@ const selectedStreamId = ref<string | null>(null)
 // 方案 F：服务端渲染热力图，前端无需延迟控制
 const playbackDelaySec = ref(0)
 const protocolPreference = ref<'auto' | 'webrtc' | 'flv' | 'hls'>('auto')
+const showDetections = ref(true)
 
 const PROTOCOL_STORAGE_KEY = 'ccs:playback:protocol'
 const DELAY_STORAGE_KEY = 'ccs:playback:delay'
 const THEME_STORAGE_KEY = 'ccs:theme'
+const LAYOUT_PREF_KEY = 'ccs:layout:pref'
+const SHOW_DETECTIONS_KEY = 'ccs:show:detections'
 const MAX_DELAY_SEC = 5
 
 const theme = ref<'dark' | 'light'>('dark')
+
+// 布局模式
+type LayoutMode = 'video-priority' | 'balanced' | 'data-priority'
+const splitSize = ref(70) // Video width percentage
+
+function setLayout(mode: LayoutMode) {
+  switch (mode) {
+    case 'video-priority':
+      splitSize.value = 70
+      break
+    case 'balanced':
+      splitSize.value = 50
+      break
+    case 'data-priority':
+      splitSize.value = 30
+      break
+  }
+  saveLayoutPref()
+}
+
+function saveLayoutPref() {
+  try {
+    localStorage.setItem(LAYOUT_PREF_KEY, String(splitSize.value))
+  } catch (e) {
+    // Ignore
+  }
+}
+
+function loadLayoutPref() {
+  try {
+    const val = localStorage.getItem(LAYOUT_PREF_KEY)
+    if (val) {
+      const size = parseFloat(val)
+      if (!isNaN(size) && size > 10 && size < 90) {
+        splitSize.value = size
+      }
+    }
+  } catch (e) {
+    // Ignore
+  }
+}
 
 // 网格模式
 const gridMode = ref(false)
@@ -118,6 +164,10 @@ function loadPlaybackPrefs() {
       if (Number.isFinite(parsed)) {
         playbackDelaySec.value = Math.min(Math.max(parsed, 0), MAX_DELAY_SEC)
       }
+    }
+    const storedShowDetections = localStorage.getItem(SHOW_DETECTIONS_KEY)
+    if (storedShowDetections !== null) {
+      showDetections.value = storedShowDetections === 'true'
     }
   } catch {
     // Ignore storage errors
@@ -334,6 +384,14 @@ watch(playbackDelaySec, (value) => {
   }
 })
 
+watch(showDetections, (value) => {
+  try {
+    localStorage.setItem(SHOW_DETECTIONS_KEY, String(value))
+  } catch {
+    // Ignore storage errors
+  }
+})
+
 watch(theme, (value) => {
   try {
     localStorage.setItem(THEME_STORAGE_KEY, value)
@@ -365,6 +423,7 @@ watch(gridMode, (enabled) => {
 onMounted(async () => {
   loadThemePreference()
   loadPlaybackPrefs()
+  loadLayoutPref()
   // 获取流列表
   try {
     await store.fetchStreams()
@@ -478,14 +537,42 @@ function handleSelectedRoiChange(roiId: string | null) {
   selectedRoiId.value = roiId
 }
 
+// 坐标转换工具
+function scalePoints(points: Point[], scaleX: number, scaleY: number): Point[] {
+  return points.map(p => ({ x: p.x * scaleX, y: p.y * scaleY }))
+}
+
 // ROI 创建（从 ROIDrawer 触发）
 function handleRoiCreate(data: { name: string; points: Point[] }) {
-  dataTabsRef.value?.handleCreateROI(data)
+  if (!displayResult.value) {
+    // 无法获取原始分辨率，直接使用
+    dataTabsRef.value?.handleCreateROI(data)
+    return
+  }
+
+  // 显示坐标 -> 原始坐标
+  const scaleX = displayResult.value.frame_width / videoWidth.value
+  const scaleY = displayResult.value.frame_height / videoHeight.value
+
+  const scaledData = {
+    ...data,
+    points: scalePoints(data.points, scaleX, scaleY)
+  }
+
+  dataTabsRef.value?.handleCreateROI(scaledData)
 }
 
 // ROI 更新（从 ROIDrawer 触发）
 function handleRoiUpdate(roiId: string, points: Point[]) {
-  dataTabsRef.value?.handleUpdateROIPoints(roiId, points)
+  if (!displayResult.value) return
+
+  // 显示坐标 -> 原始坐标
+  const scaleX = displayResult.value.frame_width / videoWidth.value
+  const scaleY = displayResult.value.frame_height / videoHeight.value
+
+  const scaledPoints = scalePoints(points, scaleX, scaleY)
+
+  dataTabsRef.value?.handleUpdateROIPoints(roiId, scaledPoints)
 }
 
 // ROI 选择（从 ROIDrawer 触发）
@@ -493,6 +580,19 @@ function handleRoiSelect(roiId: string | null) {
   selectedRoiId.value = roiId
   dataTabsRef.value?.handleSelectROI(roiId)
 }
+
+// 计算用于显示的 ROI（原始坐标 -> 显示坐标）
+const displayRois = computed(() => {
+  if (!displayResult.value) return rois.value
+
+  const scaleX = videoWidth.value / displayResult.value.frame_width
+  const scaleY = videoHeight.value / displayResult.value.frame_height
+
+  return rois.value.map(roi => ({
+    ...roi,
+    points: scalePoints(roi.points, scaleX, scaleY)
+  }))
+})
 
 // ROI 删除（从 ROIDrawer 触发）
 function handleRoiDelete(roiId: string) {
@@ -701,128 +801,143 @@ let resizeObserver: typeof window.ResizeObserver.prototype | null = null
         <StreamGrid :items="gridItems" :selected-id="selectedStreamId" @select="handleGridSelect" />
       </div>
 
-      <template v-else>
-        <!-- 视频播放区 -->
-        <div class="video-section">
-          <div v-if="selectedStream" class="video-toolbar">
-            <div class="toolbar-group">
-              <label>协议</label>
-              <select v-model="protocolPreference" class="toolbar-select">
-                <option value="auto">自动</option>
-                <option value="webrtc">WebRTC</option>
-                <option value="flv">HTTP-FLV</option>
-                <option value="hls">HLS</option>
-              </select>
+      <splitpanes v-else class="default-theme" :push-other-panes="false" @resized="splitSize = $event[0].size; saveLayoutPref()">
+        <pane :size="splitSize" style="min-width: 20%">
+          <!-- 视频播放区 -->
+          <div class="video-section">
+            <div v-if="selectedStream" class="video-toolbar">
+              <div class="toolbar-group">
+                <label>协议</label>
+                <select v-model="protocolPreference" class="toolbar-select">
+                  <option value="auto">自动</option>
+                  <option value="webrtc">WebRTC</option>
+                  <option value="flv">HTTP-FLV</option>
+                  <option value="hls">HLS</option>
+                </select>
+              </div>
+              <div class="toolbar-group">
+                <label>播放延迟</label>
+                <input v-model.number="playbackDelaySec" type="range" min="0" max="5" step="0.5" />
+                <span>{{ playbackDelaySec }}s</span>
+              </div>
+              <div class="toolbar-group">
+                <label>布局</label>
+                <button class="btn-icon" title="视频优先" @click="setLayout('video-priority')">🔳</button>
+                <button class="btn-icon" title="均衡" @click="setLayout('balanced')">⚖️</button>
+                <button class="btn-icon" title="数据优先" @click="setLayout('data-priority')">📊</button>
+              </div>
+              <div class="toolbar-group">
+                <label class="checkbox-label">
+                  <input type="checkbox" v-model="showDetections">
+                  检测框
+                </label>
+              </div>
+              <button class="btn btn-secondary" @click="gridMode = true">网格模式</button>
             </div>
-            <div class="toolbar-group">
-              <label>播放延迟</label>
-              <input v-model.number="playbackDelaySec" type="range" min="0" max="5" step="0.5" />
-              <span>{{ playbackDelaySec }}s</span>
-            </div>
-            <button class="btn btn-secondary" @click="gridMode = true">网格模式</button>
-          </div>
 
-          <div ref="videoContainerRef" class="video-container">
-            <template v-if="selectedStream">
-              <VideoPlayer
-                :play-url="selectedStream.play_url"
-                :webrtc-url="selectedStream.webrtc_url"
-                :stream-id="selectedStream.stream_id"
-                :status="selectedStream.status"
-                :playback-delay-sec="playbackDelaySec"
-                :preferred-protocol="protocolPreference"
-              />
-              <DetectionOverlay
-                v-if="displayResult?.detections?.length && !roiEditMode"
-                :detections="displayResult.detections"
-                :frame-width="displayResult.frame_width"
-                :frame-height="displayResult.frame_height"
-                :width="videoWidth"
-                :height="videoHeight"
-              />
-              <!-- ROI 绘制层（编辑模式） -->
-              <ROIDrawer
-                v-if="roiEditMode"
-                :width="videoWidth"
-                :height="videoHeight"
-                :rois="rois"
-                :selected-roi-id="selectedRoiId"
-                :edit-mode="roiEditMode"
-                @create="handleRoiCreate"
-                @update="handleRoiUpdate"
-                @select="handleRoiSelect"
-                @delete="handleRoiDelete"
-              />
-              <!-- 区域密度显示层（非编辑模式且有 ROI） -->
-              <RegionDensityDisplay
-                v-else-if="rois.length > 0"
-                :region-stats="displayResult?.region_stats || []"
-                :rois="rois"
-                :width="videoWidth"
-                :height="videoHeight"
-              />
-            </template>
-            <div v-else class="no-stream">
-              <span class="no-stream-icon">📺</span>
-              <p>请选择或创建视频流</p>
+            <div ref="videoContainerRef" class="video-container">
+              <template v-if="selectedStream">
+                <VideoPlayer
+                  :play-url="selectedStream.play_url"
+                  :webrtc-url="selectedStream.webrtc_url"
+                  :stream-id="selectedStream.stream_id"
+                  :status="selectedStream.status"
+                  :playback-delay-sec="playbackDelaySec"
+                  :preferred-protocol="protocolPreference"
+                />
+                <DetectionOverlay
+                  v-if="showDetections && displayResult?.detections?.length && !roiEditMode"
+                  :detections="displayResult.detections"
+                  :frame-width="displayResult.frame_width"
+                  :frame-height="displayResult.frame_height"
+                  :width="videoWidth"
+                  :height="videoHeight"
+                />
+                <!-- ROI 绘制层（编辑模式） -->
+                <ROIDrawer
+                  v-if="roiEditMode"
+                  :width="videoWidth"
+                  :height="videoHeight"
+                :rois="displayRois"
+                  :selected-roi-id="selectedRoiId"
+                  :edit-mode="roiEditMode"
+                  @create="handleRoiCreate"
+                  @update="handleRoiUpdate"
+                  @select="handleRoiSelect"
+                  @delete="handleRoiDelete"
+                />
+                <!-- 区域密度显示层（非编辑模式且有 ROI） -->
+                <RegionDensityDisplay
+                  v-else-if="rois.length > 0"
+                  :region-stats="displayResult?.region_stats || []"
+                :rois="displayRois"
+                  :width="videoWidth"
+                  :height="videoHeight"
+                />
+              </template>
+              <div v-else class="no-stream">
+                <span class="no-stream-icon">📺</span>
+                <p>请选择或创建视频流</p>
+              </div>
+            </div>
+
+            <!-- 控制栏 -->
+            <div v-if="selectedStream" class="controls">
+              <div class="control-info">
+                <span class="control-stream-name">{{ selectedStream.name }}</span>
+                <span
+                  class="control-status"
+                  :style="{ color: getStatusConfig(selectedStream.status).color }"
+                >
+                  {{ getStatusConfig(selectedStream.status).icon }} {{ getStatusConfig(selectedStream.status).label }}
+                </span>
+              </div>
+              <div class="control-buttons">
+                <button
+                  v-if="canStart(selectedStream.status)"
+                  class="btn btn-start"
+                  @click="handleStart()"
+                >
+                  ▶ 开始
+                </button>
+                <button
+                  v-if="canStop(selectedStream.status)"
+                  class="btn btn-stop"
+                  @click="handleStop()"
+                >
+                  ⏹ 停止
+                </button>
+                <button
+                  class="btn btn-delete"
+                  @click="confirmDelete(selectedStream.stream_id)"
+                >
+                  🗑 删除
+                </button>
+              </div>
             </div>
           </div>
+        </pane>
 
-          <!-- 控制栏 -->
-          <div v-if="selectedStream" class="controls">
-            <div class="control-info">
-              <span class="control-stream-name">{{ selectedStream.name }}</span>
-              <span 
-                class="control-status"
-                :style="{ color: getStatusConfig(selectedStream.status).color }"
-              >
-                {{ getStatusConfig(selectedStream.status).icon }} {{ getStatusConfig(selectedStream.status).label }}
-              </span>
+        <pane :size="100 - splitSize" style="min-width: 20%">
+          <!-- 数据与配置 Tab 面板 -->
+          <div class="data-panel-container">
+            <div class="panel-toggle">
+              <span>数据面板</span>
             </div>
-            <div class="control-buttons">
-              <button
-                v-if="canStart(selectedStream.status)"
-                class="btn btn-start"
-                @click="handleStart()"
-              >
-                ▶ 开始
-              </button>
-              <button
-                v-if="canStop(selectedStream.status)"
-                class="btn btn-stop"
-                @click="handleStop()"
-              >
-                ⏹ 停止
-              </button>
-              <button 
-                class="btn btn-delete" 
-                @click="confirmDelete(selectedStream.stream_id)"
-              >
-                🗑 删除
-              </button>
-            </div>
+            <DataTabs
+              v-if="showDataPanel"
+              ref="dataTabsRef"
+              :stream-id="selectedStreamId"
+              :result="displayResult"
+              :status-metrics="statusMetrics"
+              :alert-events="alertEvents"
+              @roi-mode-change="handleRoiModeChange"
+              @rois-change="handleRoisChange"
+              @selected-roi-change="handleSelectedRoiChange"
+            />
           </div>
-        </div>
-
-        <!-- 数据与配置 Tab 面板 -->
-        <div class="panel-toggle">
-          <span>数据面板</span>
-          <button class="btn btn-secondary" @click="showDataPanel = !showDataPanel">
-            {{ showDataPanel ? '收起' : '展开' }}
-          </button>
-        </div>
-        <DataTabs
-          v-if="showDataPanel"
-          ref="dataTabsRef"
-          :stream-id="selectedStreamId"
-          :result="displayResult"
-          :status-metrics="statusMetrics"
-          :alert-events="alertEvents"
-          @roi-mode-change="handleRoiModeChange"
-          @rois-change="handleRoisChange"
-          @selected-roi-change="handleSelectedRoiChange"
-        />
-      </template>
+        </pane>
+      </splitpanes>
     </main>
 
     <!-- 删除确认对话框 -->
@@ -1183,11 +1298,47 @@ let resizeObserver: typeof window.ResizeObserver.prototype | null = null
 }
 
 .video-section {
-  flex: 1;
+  height: 100%;
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+  overflow: hidden;
+}
+
+.data-panel-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.btn-icon {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  padding: 0;
+}
+
+.btn-icon:hover {
+  background: var(--color-border);
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
 }
 
 .video-toolbar {

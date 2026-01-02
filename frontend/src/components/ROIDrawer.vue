@@ -16,6 +16,10 @@ const props = defineProps<{
   editMode: boolean
 }>()
 
+// 形状工具类型
+type ShapeTool = 'polygon' | 'rectangle' | 'circle'
+const activeTool = ref<ShapeTool>('polygon')
+
 const emit = defineEmits<{
   (e: 'create', roi: ROICreate): void
   (e: 'update', roiId: string, points: Point[]): void
@@ -32,6 +36,10 @@ const currentPoints = ref<Point[]>([])
 const hoveredRoiId = ref<string | null>(null)
 const dragPointIndex = ref<number | null>(null)
 const isDragging = ref(false)
+
+// 矩形和圆形绘制的临时点
+const startPoint = ref<Point | null>(null)
+const endPoint = ref<Point | null>(null)
 
 // 颜色配置
 const COLORS = {
@@ -92,6 +100,29 @@ function isPointInPolygon(point: Point, polygon: Point[]): boolean {
   }
 
   return inside
+}
+
+function getCirclePoints(center: Point, radius: Point): Point[] {
+  const r = Math.sqrt(Math.pow(radius.x - center.x, 2) + Math.pow(radius.y - center.y, 2))
+  const points: Point[] = []
+  const segments = 32
+  for (let i = 0; i < segments; i++) {
+    const theta = (i / segments) * Math.PI * 2
+    points.push({
+      x: center.x + r * Math.cos(theta),
+      y: center.y + r * Math.sin(theta)
+    })
+  }
+  return points
+}
+
+function getRectanglePoints(start: Point, end: Point): Point[] {
+  return [
+    { x: start.x, y: start.y },
+    { x: end.x, y: start.y },
+    { x: end.x, y: end.y },
+    { x: start.x, y: end.y }
+  ]
 }
 
 // 判断点是否靠近某个顶点
@@ -215,8 +246,18 @@ function render() {
   }
 
   // 绘制正在绘制的多边形
-  if (isDrawing.value && currentPoints.value.length > 0) {
-    drawPolygon(ctx, currentPoints.value, COLORS.drawing, COLORS.drawingStroke, true)
+  if (isDrawing.value) {
+    if (activeTool.value === 'polygon' && currentPoints.value.length > 0) {
+      drawPolygon(ctx, currentPoints.value, COLORS.drawing, COLORS.drawingStroke, true)
+    } else if ((activeTool.value === 'rectangle' || activeTool.value === 'circle') && startPoint.value && endPoint.value) {
+      let points: Point[] = []
+      if (activeTool.value === 'rectangle') {
+        points = getRectanglePoints(startPoint.value, endPoint.value)
+      } else if (activeTool.value === 'circle') {
+        points = getCirclePoints(startPoint.value, endPoint.value)
+      }
+      drawPolygon(ctx, points, COLORS.drawing, COLORS.drawingStroke, true)
+    }
   }
 }
 
@@ -228,23 +269,33 @@ function handleMouseDown(e: MouseEvent) {
 
   // 如果正在绘制新的 ROI
   if (isDrawing.value) {
-    // 检查是否点击了第一个点（闭合多边形）
-    if (currentPoints.value.length >= 3) {
-      const firstPoint = currentPoints.value[0]
-      if (firstPoint) {
-        const dx = pos.x - firstPoint.x
-        const dy = pos.y - firstPoint.y
-        if (Math.sqrt(dx * dx + dy * dy) <= POINT_HIT_RADIUS) {
-          // 完成绘制
-          finishDrawing()
-          return
+    if (activeTool.value === 'polygon') {
+      // 检查是否点击了第一个点（闭合多边形）
+      if (currentPoints.value.length >= 3) {
+        const firstPoint = currentPoints.value[0]
+        if (firstPoint) {
+          const dx = pos.x - firstPoint.x
+          const dy = pos.y - firstPoint.y
+          if (Math.sqrt(dx * dx + dy * dy) <= POINT_HIT_RADIUS) {
+            // 完成绘制
+            finishDrawing()
+            return
+          }
         }
       }
+      // 添加新点
+      currentPoints.value.push(pos)
+      render()
+    } else if (activeTool.value === 'rectangle' || activeTool.value === 'circle') {
+      if (!startPoint.value) {
+        startPoint.value = pos
+        endPoint.value = pos
+      } else {
+        endPoint.value = pos
+        finishDrawing()
+      }
+      render()
     }
-
-    // 添加新点
-    currentPoints.value.push(pos)
-    render()
     return
   }
 
@@ -276,6 +327,16 @@ function handleMouseDown(e: MouseEvent) {
 // 处理鼠标移动
 function handleMouseMove(e: MouseEvent) {
   const pos = getMousePos(e)
+
+  if (isDrawing.value) {
+    if (activeTool.value === 'rectangle' || activeTool.value === 'circle') {
+      if (startPoint.value) {
+        endPoint.value = pos
+        render()
+      }
+    }
+    return
+  }
 
   // 拖拽顶点
   if (isDragging.value && dragPointIndex.value !== null && props.selectedRoiId) {
@@ -328,6 +389,11 @@ function handleDoubleClick(e: MouseEvent) {
   }
 
   // 开始绘制新 ROI
+  if (activeTool.value !== 'polygon') {
+    // 对于矩形和圆形，双击不应触发绘制（因为单击已开始绘制）
+    return
+  }
+
   isDrawing.value = true
   currentPoints.value = [pos]
   emit('select', null)
@@ -356,10 +422,19 @@ function handleKeyDown(e: KeyboardEvent) {
 
 // 完成绘制
 function finishDrawing() {
-  if (currentPoints.value.length >= 3) {
+  let points: Point[] = []
+  if (activeTool.value === 'polygon') {
+    points = [...currentPoints.value]
+  } else if (activeTool.value === 'rectangle' && startPoint.value && endPoint.value) {
+    points = getRectanglePoints(startPoint.value, endPoint.value)
+  } else if (activeTool.value === 'circle' && startPoint.value && endPoint.value) {
+    points = getCirclePoints(startPoint.value, endPoint.value)
+  }
+
+  if (points.length >= 3) {
     emit('create', {
       name: `区域 ${props.rois.length + 1}`,
-      points: [...currentPoints.value]
+      points
     })
   }
   cancelDrawing()
@@ -369,6 +444,8 @@ function finishDrawing() {
 function cancelDrawing() {
   isDrawing.value = false
   currentPoints.value = []
+  startPoint.value = null
+  endPoint.value = null
   render()
 }
 
@@ -407,21 +484,95 @@ defineExpose({
 </script>
 
 <template>
-  <canvas
-    ref="canvasRef"
-    class="roi-drawer"
-    :width="width"
-    :height="height"
-    :class="{ 'edit-mode': editMode, drawing: isDrawing }"
-    @mousedown="handleMouseDown"
-    @mousemove="handleMouseMove"
-    @mouseup="handleMouseUp"
-    @mouseleave="handleMouseUp"
-    @dblclick="handleDoubleClick"
-  ></canvas>
+  <div class="drawer-container">
+    <div v-if="editMode" class="tools-panel">
+      <button
+        class="tool-btn"
+        :class="{ active: activeTool === 'polygon' }"
+        title="多边形 (双击开始)"
+        @click="activeTool = 'polygon'"
+      >
+        📐
+      </button>
+      <button
+        class="tool-btn"
+        :class="{ active: activeTool === 'rectangle' }"
+        title="矩形 (点击拖拽)"
+        @click="activeTool = 'rectangle'; isDrawing = true; currentPoints = []"
+      >
+        ⬜
+      </button>
+      <button
+        class="tool-btn"
+        :class="{ active: activeTool === 'circle' }"
+        title="圆形 (点击中心拖拽半径)"
+        @click="activeTool = 'circle'; isDrawing = true; currentPoints = []"
+      >
+        ⭕
+      </button>
+    </div>
+    <canvas
+      ref="canvasRef"
+      class="roi-drawer"
+      :width="width"
+      :height="height"
+      :class="{ 'edit-mode': editMode, drawing: isDrawing }"
+      @mousedown="handleMouseDown"
+      @mousemove="handleMouseMove"
+      @mouseup="handleMouseUp"
+      @mouseleave="handleMouseUp"
+      @dblclick="handleDoubleClick"
+    ></canvas>
+  </div>
 </template>
 
 <style scoped>
+.drawer-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.tools-panel {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.7);
+  padding: 8px;
+  border-radius: 8px;
+  display: flex;
+  gap: 8px;
+  pointer-events: auto;
+  z-index: 100;
+}
+
+.tool-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+}
+
+.tool-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.tool-btn.active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
 .roi-drawer {
   position: absolute;
   top: 0;

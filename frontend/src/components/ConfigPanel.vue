@@ -203,6 +203,40 @@ function applyPreset() {
   formValues.value.render_overlay_alpha = preset.render_overlay_alpha
 }
 
+function exportConfig() {
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(formValues.value, null, 2))
+  const downloadAnchorNode = document.createElement('a')
+  downloadAnchorNode.setAttribute("href", dataStr)
+  downloadAnchorNode.setAttribute("download", `config_${props.streamId}.json`)
+  document.body.appendChild(downloadAnchorNode)
+  downloadAnchorNode.click()
+  downloadAnchorNode.remove()
+}
+
+function importConfig() {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.json'
+  input.onchange = (e) => {
+    const file = (e.target as HTMLInputElement).files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target?.result as string)
+        // Basic validation
+        if (typeof data.confidence_threshold === 'number') {
+          formValues.value = { ...formValues.value, ...data }
+        }
+      } catch (err) {
+        alert('无效的配置文件')
+      }
+    }
+    reader.readAsText(file)
+  }
+  input.click()
+}
+
 // 监听 streamId 变化
 watch(() => props.streamId, loadConfig, { immediate: true })
 onMounted(() => {
@@ -454,26 +488,32 @@ onMounted(() => {
 
       <!-- 操作按钮 -->
       <div class="form-actions">
-        <button
-          class="btn btn-secondary"
-          :disabled="!hasChanges"
-          @click="cancelChanges"
-        >
-          取消
-        </button>
-        <button
-          class="btn btn-secondary"
-          @click="resetToDefaults"
-        >
-          恢复默认
-        </button>
-        <button
-          class="btn btn-primary"
-          :disabled="!hasChanges || saving"
-          @click="saveConfig"
-        >
-          {{ saving ? '保存中...' : '保存配置' }}
-        </button>
+        <div class="left-actions">
+          <button class="btn btn-secondary" @click="importConfig">导入</button>
+          <button class="btn btn-secondary" @click="exportConfig">导出</button>
+        </div>
+        <div class="right-actions">
+          <button
+            class="btn btn-secondary"
+            :disabled="!hasChanges"
+            @click="cancelChanges"
+          >
+            取消
+          </button>
+          <button
+            class="btn btn-secondary"
+            @click="resetToDefaults"
+          >
+            恢复默认
+          </button>
+          <button
+            class="btn btn-primary"
+            :disabled="!hasChanges || saving"
+            @click="saveConfig"
+          >
+            {{ saving ? '保存中...' : '保存配置' }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -692,11 +732,16 @@ onMounted(() => {
 
 .form-actions {
   display: flex;
-  justify-content: flex-end;
-  gap: 8px;
+  justify-content: space-between;
+  align-items: center;
   margin-top: 8px;
   padding-top: 16px;
   border-top: 1px solid var(--color-border);
+}
+
+.left-actions, .right-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .btn {

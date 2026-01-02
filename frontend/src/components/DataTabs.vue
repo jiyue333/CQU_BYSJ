@@ -6,6 +6,7 @@
 
 import { ref, computed, watch } from 'vue'
 import StatsPanel from './StatsPanel.vue'
+import RealtimeChart from './RealtimeChart.vue'
 import AlertsPanel from './AlertsPanel.vue'
 import ROITemplateSelector from './ROITemplateSelector.vue'
 import HistoryChart from './HistoryChart.vue'
@@ -235,8 +236,12 @@ defineExpose({
     <!-- Tab 内容 -->
     <div class="tab-content">
       <!-- 实时统计 -->
-      <div v-if="activeTab === 'realtime'" class="tab-panel">
+      <div v-if="activeTab === 'realtime'" class="tab-panel realtime-panel">
         <StatsPanel :result="result" :metrics="statusMetrics" :stream-id="streamId" />
+        <div class="chart-section">
+          <h4>实时趋势</h4>
+          <RealtimeChart :stream-id="streamId" :result="result" :rois="rois" />
+        </div>
       </div>
 
       <!-- ROI 管理 -->
@@ -396,6 +401,30 @@ defineExpose({
 
 .tab-panel {
   padding: 16px;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.realtime-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.chart-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-panel-alt);
+  border-radius: 8px;
+  padding: 12px;
+  min-height: 300px;
+}
+
+.chart-section h4 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  color: var(--color-text);
 }
 
 .empty-state {
