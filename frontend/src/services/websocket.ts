@@ -4,7 +4,7 @@
  * Requirements: 5.3, 9.1, 9.2
  */
 
-import type { DetectionResult, StreamStatusUpdate, WsMessage } from '@/types'
+import type { AlertEvent, DetectionResult, StreamStatusUpdate, WsMessage } from '@/types'
 
 // 重连配置
 const RECONNECT_BASE_DELAY = 1000 // 1s
@@ -26,6 +26,7 @@ function calculateBackoff(attempts: number): number {
 
 type ResultCallback = (result: DetectionResult) => void
 type StatusCallback = (status: StreamStatusUpdate) => void
+type AlertCallback = (event: AlertEvent) => void
 type ConnectionCallback = (connected: boolean) => void
 type ReconnectCallback = (attempt: number, maxAttempts: number, delay: number) => void
 type ErrorCallback = (error: string) => void
@@ -413,5 +414,152 @@ export class StatusWebSocket {
    */
   get currentReconnectAttempts(): number {
     return this.reconnectAttempts
+  }
+}
+
+/**
+ * 告警 WebSocket 服务
+ */
+export class AlertWebSocket {
+  private ws: WebSocket | null = null
+  private reconnectAttempts = 0
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  private isManualClose = false
+
+  private onAlert: AlertCallback | null = null
+  private onConnection: ConnectionCallback | null = null
+  private onReconnect: ReconnectCallback | null = null
+  private onError: ErrorCallback | null = null
+
+  connect(
+    onAlert: AlertCallback,
+    onConnection?: ConnectionCallback,
+    onReconnect?: ReconnectCallback,
+    onError?: ErrorCallback
+  ): void {
+    this.onAlert = onAlert
+    this.onConnection = onConnection || null
+    this.onReconnect = onReconnect || null
+    this.onError = onError || null
+    this.isManualClose = false
+    this.reconnectAttempts = 0
+    this.doConnect()
+  }
+
+  private doConnect(): void {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const host = window.location.host
+    const url = `${protocol}//${host}/ws/alerts`
+
+    try {
+      this.ws = new WebSocket(url)
+    } catch (err) {
+      console.error('WebSocket creation failed:', err)
+      this.onError?.(`WebSocket 创建失败: ${err}`)
+      this.scheduleReconnect()
+      return
+    }
+
+    this.ws.onopen = () => {
+      this.reconnectAttempts = 0
+      this.startHeartbeat()
+      this.onConnection?.(true)
+    }
+
+    this.ws.onmessage = (event) => {
+      try {
+        const msg: WsMessage = JSON.parse(event.data)
+        if (msg.type === 'alert' && msg.event && this.onAlert) {
+          this.onAlert(msg.event)
+        }
+      } catch {
+        console.error('Failed to parse WebSocket message:', event.data)
+      }
+    }
+
+    this.ws.onclose = (event) => {
+      this.stopHeartbeat()
+      this.onConnection?.(false)
+      if (!this.isManualClose) {
+        if (event.code !== 1000) {
+          console.warn(`WebSocket closed abnormally: code=${event.code}, reason=${event.reason}`)
+        }
+        this.scheduleReconnect()
+      }
+    }
+
+    this.ws.onerror = (error) => {
+      console.error('WebSocket error:', error)
+      this.onError?.('WebSocket 连接错误')
+    }
+  }
+
+  private send(msg: WsMessage): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(msg))
+    }
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat()
+    this.heartbeatTimer = setInterval(() => {
+      this.send({ type: 'ping', ts: Date.now() })
+    }, HEARTBEAT_INTERVAL)
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer)
+      this.heartbeatTimer = null
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+    }
+
+    if (this.reconnectAttempts >= RECONNECT_MAX_ATTEMPTS) {
+      console.error(`Max reconnection attempts (${RECONNECT_MAX_ATTEMPTS}) reached`)
+      this.onError?.(`重连失败：已达到最大重试次数 (${RECONNECT_MAX_ATTEMPTS})`)
+      return
+    }
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      console.log('Browser is offline, waiting for online event...')
+      const onOnline = () => {
+        window.removeEventListener('online', onOnline)
+        this.scheduleReconnect()
+      }
+      window.addEventListener('online', onOnline)
+      return
+    }
+
+    const delay = calculateBackoff(this.reconnectAttempts)
+    console.log(`Reconnecting in ${Math.round(delay)}ms (attempt ${this.reconnectAttempts + 1}/${RECONNECT_MAX_ATTEMPTS})`)
+    this.onReconnect?.(this.reconnectAttempts + 1, RECONNECT_MAX_ATTEMPTS, delay)
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectAttempts++
+      this.doConnect()
+    }, delay)
+  }
+
+  disconnect(): void {
+    this.isManualClose = true
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    this.stopHeartbeat()
+    if (this.ws) {
+      this.ws.close()
+      this.ws = null
+    }
+  }
+
+  get isConnected(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN
   }
 }

@@ -11,10 +11,12 @@ import type {
   VideoStreamCreate,
   VideoStreamStart,
   DetectionResult,
-  StreamStatusUpdate
+  StreamStatusUpdate,
+  StatusMetrics,
+  AlertEvent
 } from '@/types'
 import * as api from '@/api'
-import { ResultWebSocket, StatusWebSocket } from '@/services/websocket'
+import { ResultWebSocket, StatusWebSocket, AlertWebSocket } from '@/services/websocket'
 
 // 通知类型
 export interface Notification {
@@ -39,6 +41,8 @@ export const useStreamsStore = defineStore('streams', () => {
   // 状态
   const streams = ref<Map<string, VideoStream>>(new Map())
   const detectionResults = ref<Map<string, DetectionResult>>(new Map())
+  const statusMetrics = ref<Map<string, StatusMetrics>>(new Map())
+  const alertEvents = ref<Map<string, AlertEvent[]>>(new Map())
   const loading = ref(false)
   const error = ref<string | null>(null)
 
@@ -51,6 +55,7 @@ export const useStreamsStore = defineStore('streams', () => {
   // WebSocket 连接
   const resultSockets = ref<Map<string, ResultWebSocket>>(new Map())
   const statusSocket = ref<StatusWebSocket | null>(null)
+  const alertSocket = ref<AlertWebSocket | null>(null)
   const wsConnected = ref(false)
 
   // 计算属性
@@ -203,6 +208,8 @@ export const useStreamsStore = defineStore('streams', () => {
       await api.deleteStream(streamId)
       streams.value.delete(streamId)
       detectionResults.value.delete(streamId)
+      statusMetrics.value.delete(streamId)
+      alertEvents.value.delete(streamId)
       unsubscribeResult(streamId)
       showSuccess(`视频流已删除`)
     } catch (e) {
@@ -272,6 +279,10 @@ export const useStreamsStore = defineStore('streams', () => {
             play_url: status.play_url ?? stream.play_url
           })
 
+          if (status.metrics) {
+            statusMetrics.value.set(status.stream_id, status.metrics)
+          }
+
           // 状态变更通知
           if (oldStatus !== status.status) {
             if (status.status === 'error') {
@@ -306,9 +317,59 @@ export const useStreamsStore = defineStore('streams', () => {
     }
   }
 
+  // 订阅告警
+  function subscribeAlerts(): void {
+    if (alertSocket.value) {
+      return
+    }
+
+    const ws = new AlertWebSocket()
+    ws.connect(
+      (event: AlertEvent) => {
+        const list = alertEvents.value.get(event.stream_id) || []
+        const existingIndex = list.findIndex((item) => item.id === event.id)
+        let updated: AlertEvent[]
+        if (existingIndex >= 0) {
+          updated = list.slice()
+          updated[existingIndex] = event
+        } else {
+          updated = [event, ...list]
+        }
+        alertEvents.value.set(event.stream_id, updated.slice(0, 200))
+
+        if (!event.end_ts) {
+          showWarning(`告警触发: ${event.message || '高密度预警'}`)
+        }
+      },
+      (connected) => {
+        console.log(`Alert WebSocket: ${connected ? 'connected' : 'disconnected'}`)
+        if (!connected) {
+          showWarning('告警通道断开，正在重连...')
+        }
+      }
+    )
+    alertSocket.value = ws
+  }
+
+  // 取消订阅告警
+  function unsubscribeAlerts(): void {
+    if (alertSocket.value) {
+      alertSocket.value.disconnect()
+      alertSocket.value = null
+    }
+  }
+
   // 获取流的检测结果
   function getDetectionResult(streamId: string): DetectionResult | undefined {
     return detectionResults.value.get(streamId)
+  }
+
+  function getStatusMetrics(streamId: string): StatusMetrics | undefined {
+    return statusMetrics.value.get(streamId)
+  }
+
+  function getAlertEvents(streamId: string): AlertEvent[] {
+    return alertEvents.value.get(streamId) || []
   }
 
   // 获取流的重连状态
@@ -323,7 +384,10 @@ export const useStreamsStore = defineStore('streams', () => {
     }
     resultSockets.value.clear()
     unsubscribeStatus()
+    unsubscribeAlerts()
     reconnectionStates.value.clear()
+    alertEvents.value.clear()
+    statusMetrics.value.clear()
     notifications.value = []
   }
 
@@ -331,6 +395,8 @@ export const useStreamsStore = defineStore('streams', () => {
     // 状态
     streams,
     detectionResults,
+    statusMetrics,
+    alertEvents,
     loading,
     error,
     wsConnected,
@@ -364,7 +430,11 @@ export const useStreamsStore = defineStore('streams', () => {
     unsubscribeResult,
     subscribeStatus,
     unsubscribeStatus,
+    subscribeAlerts,
+    unsubscribeAlerts,
     getDetectionResult,
+    getStatusMetrics,
+    getAlertEvents,
     cleanup
   }
 })

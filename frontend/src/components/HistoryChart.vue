@@ -15,9 +15,9 @@ import {
   getAggregatedHistory,
   downloadHistory,
   type AggregationGranularity,
-  type AggregatedStat,
-  type AggregatedHistoryResponse
+  type AggregatedStat
 } from '../api/history'
+import { useStreamsStore } from '@/stores/streams'
 
 // Props
 const props = defineProps<{
@@ -27,7 +27,18 @@ const props = defineProps<{
 // 状态
 const loading = ref(false)
 const error = ref<string | null>(null)
-const historyData = ref<AggregatedHistoryResponse | null>(null)
+const historySeries = ref<Array<{
+  streamId: string
+  name: string
+  color: string
+  data: AggregatedStat[]
+}>>([])
+
+const store = useStreamsStore()
+
+const selectedStreamIds = ref<string[]>([])
+
+const SERIES_COLORS = ['#4CAF50', '#FF9800', '#2196F3', '#E91E63', '#00BCD4', '#FFC107']
 
 // 图表类型
 type ChartType = 'line' | 'bar'
@@ -46,6 +57,21 @@ const customEndTime = ref('')
 
 // Canvas 引用
 const chartCanvas = ref<HTMLCanvasElement | null>(null)
+
+const primarySeries = computed(() => historySeries.value[0] || null)
+const comparisonMode = computed(() => historySeries.value.length > 1)
+
+const streamOptions = computed(() => store.streamList)
+const primarySummary = computed(() => {
+  const data = primarySeries.value?.data || []
+  if (!data.length) return null
+  const total = data.reduce((sum, item) => sum + item.avg_count, 0)
+  return {
+    points: data.length,
+    avg: total / data.length,
+    max: Math.max(...data.map((item) => item.max_count))
+  }
+})
 
 // 计算时间范围
 const timeRangeParams = computed(() => {
@@ -91,15 +117,31 @@ async function loadData() {
   error.value = null
   
   try {
-    historyData.value = await getAggregatedHistory(props.streamId, {
-      granularity: granularity.value,
-      ...timeRangeParams.value
-    })
+    const targets = selectedStreamIds.value.length ? selectedStreamIds.value : [props.streamId]
+    const responses = await Promise.all(
+      targets.map((streamId) =>
+        getAggregatedHistory(streamId, {
+          granularity: granularity.value,
+          ...timeRangeParams.value
+        })
+      )
+    )
+    historySeries.value = responses.map((response, index) => ({
+      streamId: response.stream_id,
+      name: store.streams.get(response.stream_id)?.name || response.stream_id,
+      color: SERIES_COLORS[index % SERIES_COLORS.length] || '#000000',
+      data: response.data
+    }))
+
+    if (chartType.value === 'bar' && comparisonMode.value) {
+      chartType.value = 'line'
+    }
     
     // 绘制图表
     drawChart()
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed to load history data'
+    historySeries.value = []
   } finally {
     loading.value = false
   }
@@ -108,12 +150,14 @@ async function loadData() {
 // 绘制图表
 function drawChart() {
   const canvas = chartCanvas.value
-  if (!canvas || !historyData.value) return
+  if (!canvas || historySeries.value.length === 0) return
   
   const ctx = canvas.getContext('2d')
   if (!ctx) return
+
+  const colors = getChartColors()
   
-  const data = historyData.value.data
+  const data = historySeries.value[0]?.data || []
   if (data.length === 0) return
   
   // 清空画布
@@ -127,12 +171,15 @@ function drawChart() {
   const chartHeight = height - padding.top - padding.bottom
   
   // 计算数据范围
-  const maxCount = Math.max(...data.map(d => d.max_count), 1)
-  const minCount = Math.min(...data.map(d => d.min_count), 0)
+  const allValues = historySeries.value.flatMap((series) =>
+    series.data.map((d) => d.avg_count)
+  )
+  const maxCount = Math.max(1, ...allValues)
+  const minCount = Math.min(0, ...allValues)
   const range = maxCount - minCount || 1
   
   // 绘制坐标轴
-  ctx.strokeStyle = '#e0e0e0'
+  ctx.strokeStyle = colors.axis
   ctx.lineWidth = 1
   
   // Y 轴
@@ -148,7 +195,7 @@ function drawChart() {
   ctx.stroke()
   
   // 绘制 Y 轴刻度
-  ctx.fillStyle = '#666'
+  ctx.fillStyle = colors.text
   ctx.font = '12px sans-serif'
   ctx.textAlign = 'right'
   
@@ -160,7 +207,7 @@ function drawChart() {
     ctx.fillText(Math.round(value).toString(), padding.left - 5, y + 4)
     
     // 网格线
-    ctx.strokeStyle = '#f0f0f0'
+    ctx.strokeStyle = colors.grid
     ctx.beginPath()
     ctx.moveTo(padding.left, y)
     ctx.lineTo(width - padding.right, y)
@@ -169,13 +216,26 @@ function drawChart() {
   
   // 绘制数据
   if (chartType.value === 'line') {
-    drawLineChart(ctx, data, padding, chartWidth, chartHeight, minCount, range)
+    if (comparisonMode.value) {
+      drawComparisonLineChart(
+        ctx,
+        historySeries.value,
+        data,
+        padding,
+        chartWidth,
+        chartHeight,
+        minCount,
+        range
+      )
+    } else {
+      drawLineChart(ctx, data, padding, chartWidth, chartHeight, minCount, range, colors)
+    }
   } else {
-    drawBarChart(ctx, data, padding, chartWidth, chartHeight, minCount, range)
+    drawBarChart(ctx, data, padding, chartWidth, chartHeight, minCount, range, colors)
   }
   
   // 绘制 X 轴标签
-  ctx.fillStyle = '#666'
+  ctx.fillStyle = colors.text
   ctx.textAlign = 'center'
   
   const xLabelCount = Math.min(data.length, 6)
@@ -192,6 +252,19 @@ function drawChart() {
   }
 }
 
+function getChartColors() {
+  const styles = getComputedStyle(document.documentElement)
+  return {
+    axis: styles.getPropertyValue('--color-border-strong').trim() || '#444',
+    grid: styles.getPropertyValue('--color-border').trim() || '#333',
+    text: styles.getPropertyValue('--color-text-muted').trim() || '#888',
+    avgLine: styles.getPropertyValue('--color-success').trim() || '#4CAF50',
+    maxLine: styles.getPropertyValue('--color-warning').trim() || '#FF5722',
+    bar: styles.getPropertyValue('--color-primary').trim() || '#2196F3',
+    barStroke: styles.getPropertyValue('--color-primary-strong').trim() || '#1976D2'
+  }
+}
+
 // 绘制折线图
 function drawLineChart(
   ctx: CanvasRenderingContext2D,
@@ -200,13 +273,14 @@ function drawLineChart(
   chartWidth: number,
   chartHeight: number,
   minCount: number,
-  range: number
+  range: number,
+  colors: ReturnType<typeof getChartColors>
 ) {
   const canvas = chartCanvas.value!
   const height = canvas.height
   
   // 绘制平均值线
-  ctx.strokeStyle = '#4CAF50'
+  ctx.strokeStyle = colors.avgLine
   ctx.lineWidth = 2
   ctx.beginPath()
   
@@ -224,7 +298,7 @@ function drawLineChart(
   ctx.stroke()
   
   // 绘制最大值线（虚线）
-  ctx.strokeStyle = '#FF5722'
+  ctx.strokeStyle = colors.maxLine
   ctx.lineWidth = 1
   ctx.setLineDash([5, 5])
   ctx.beginPath()
@@ -244,7 +318,7 @@ function drawLineChart(
   ctx.setLineDash([])
   
   // 绘制数据点
-  ctx.fillStyle = '#4CAF50'
+  ctx.fillStyle = colors.avgLine
   data.forEach((d, i) => {
     const x = padding.left + (chartWidth * i) / (data.length - 1 || 1)
     const y = height - padding.bottom - (chartHeight * (d.avg_count - minCount)) / range
@@ -255,6 +329,52 @@ function drawLineChart(
   })
 }
 
+function drawComparisonLineChart(
+  ctx: CanvasRenderingContext2D,
+  seriesList: Array<{ data: AggregatedStat[]; color: string }>,
+  baseData: AggregatedStat[],
+  padding: { top: number; right: number; bottom: number; left: number },
+  chartWidth: number,
+  chartHeight: number,
+  minCount: number,
+  range: number
+) {
+  const canvas = chartCanvas.value!
+  const height = canvas.height
+  const baseTimestamps = baseData.map((item) => new Date(item.timestamp).getTime())
+
+  for (const series of seriesList) {
+    const lookup = new Map<number, AggregatedStat>()
+    for (const item of series.data) {
+      lookup.set(new Date(item.timestamp).getTime(), item)
+    }
+
+    ctx.strokeStyle = series.color
+    ctx.lineWidth = 2
+    ctx.setLineDash([])
+    ctx.beginPath()
+
+    let started = false
+    baseTimestamps.forEach((ts, i) => {
+      const item = lookup.get(ts)
+      if (!item) {
+        started = false
+        return
+      }
+      const x = padding.left + (chartWidth * i) / (baseData.length - 1 || 1)
+      const y = height - padding.bottom - (chartHeight * (item.avg_count - minCount)) / range
+      if (!started) {
+        ctx.moveTo(x, y)
+        started = true
+      } else {
+        ctx.lineTo(x, y)
+      }
+    })
+
+    ctx.stroke()
+  }
+}
+
 // 绘制柱状图
 function drawBarChart(
   ctx: CanvasRenderingContext2D,
@@ -263,7 +383,8 @@ function drawBarChart(
   chartWidth: number,
   chartHeight: number,
   minCount: number,
-  range: number
+  range: number,
+  colors: ReturnType<typeof getChartColors>
 ) {
   const canvas = chartCanvas.value!
   const height = canvas.height
@@ -276,11 +397,11 @@ function drawBarChart(
     const y = height - padding.bottom - barHeight
     
     // 绘制柱子
-    ctx.fillStyle = '#2196F3'
+    ctx.fillStyle = colors.bar
     ctx.fillRect(x, y, barWidth, barHeight)
     
     // 绘制边框
-    ctx.strokeStyle = '#1976D2'
+    ctx.strokeStyle = colors.barStroke
     ctx.lineWidth = 1
     ctx.strokeRect(x, y, barWidth, barHeight)
   })
@@ -306,10 +427,41 @@ async function handleExport(format: 'csv' | 'excel') {
   }
 }
 
+function toggleStreamSelection(streamId: string) {
+  const current = new Set(selectedStreamIds.value)
+  if (current.has(streamId)) {
+    if (current.size === 1) return
+    current.delete(streamId)
+  } else {
+    current.add(streamId)
+  }
+  selectedStreamIds.value = Array.from(current)
+}
+
 // 监听参数变化
-watch([() => props.streamId, granularity, timeRange, customStartTime, customEndTime], () => {
+watch(
+  () => props.streamId,
+  (streamId) => {
+    if (streamId) {
+      selectedStreamIds.value = [streamId]
+    } else {
+      selectedStreamIds.value = []
+    }
+  },
+  { immediate: true }
+)
+
+watch([granularity, timeRange, customStartTime, customEndTime], () => {
   loadData()
 })
+
+watch(
+  selectedStreamIds,
+  () => {
+    loadData()
+  },
+  { deep: true }
+)
 
 // 监听图表类型变化
 watch(chartType, () => {
@@ -324,17 +476,22 @@ function handleResize() {
   }
 }
 
+function handleThemeChange() {
+  drawChart()
+}
+
 onMounted(() => {
   if (chartCanvas.value) {
     chartCanvas.value.width = chartCanvas.value.parentElement?.clientWidth || 600
     chartCanvas.value.height = 300
   }
-  loadData()
   window.addEventListener('resize', handleResize)
+  window.addEventListener('theme-change', handleThemeChange)
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
+  window.removeEventListener('theme-change', handleThemeChange)
 })
 </script>
 
@@ -358,14 +515,14 @@ onUnmounted(() => {
       <!-- 自定义时间范围 -->
       <div v-if="timeRange === 'custom'" class="control-group">
         <input
-          type="datetime-local"
           v-model="customStartTime"
+          type="datetime-local"
           placeholder="开始时间"
         />
         <span>至</span>
         <input
-          type="datetime-local"
           v-model="customEndTime"
+          type="datetime-local"
           placeholder="结束时间"
         />
       </div>
@@ -383,16 +540,38 @@ onUnmounted(() => {
       <!-- 图表类型 -->
       <div class="control-group">
         <label>图表类型:</label>
-        <select v-model="chartType">
+        <select v-model="chartType" :disabled="comparisonMode">
           <option value="line">折线图</option>
           <option value="bar">柱状图</option>
         </select>
+        <span v-if="comparisonMode" class="hint">对比模式仅支持折线图</span>
+      </div>
+
+      <!-- 多流对比 -->
+      <div v-if="streamOptions.length > 1" class="control-group compare-group">
+        <label>对比流:</label>
+        <div class="compare-list">
+          <label
+            v-for="stream in streamOptions"
+            :key="stream.stream_id"
+            class="compare-item"
+          >
+            <input
+              type="checkbox"
+              :checked="selectedStreamIds.includes(stream.stream_id)"
+              @change="toggleStreamSelection(stream.stream_id)"
+            />
+            <span :class="{ primary: stream.stream_id === selectedStreamIds[0] }">
+              {{ stream.name }}
+            </span>
+          </label>
+        </div>
       </div>
       
       <!-- 导出按钮 -->
       <div class="control-group">
-        <button @click="handleExport('csv')" :disabled="loading">导出 CSV</button>
-        <button @click="handleExport('excel')" :disabled="loading">导出 Excel</button>
+        <button :disabled="loading" @click="handleExport('csv')">导出 CSV</button>
+        <button :disabled="loading" @click="handleExport('excel')">导出 Excel</button>
       </div>
     </div>
     
@@ -405,36 +584,48 @@ onUnmounted(() => {
     <!-- 图表 -->
     <div class="chart-container">
       <canvas ref="chartCanvas"></canvas>
+      <div v-if="!loading && primarySeries && primarySeries.data.length === 0" class="empty-state">
+        <p>📊 当前时间范围无数据</p>
+        <p>请尝试调整时间范围</p>
+      </div>
     </div>
     
     <!-- 图例 -->
     <div class="legend">
-      <div class="legend-item">
-        <span class="legend-color" style="background: #4CAF50"></span>
-        <span>平均人数</span>
-      </div>
-      <div class="legend-item">
-        <span class="legend-color legend-dashed" style="border-color: #FF5722"></span>
-        <span>最大人数</span>
-      </div>
+      <template v-if="comparisonMode">
+        <div v-for="series in historySeries" :key="series.streamId" class="legend-item">
+          <span class="legend-color" :style="{ background: series.color }"></span>
+          <span>{{ series.name }}</span>
+        </div>
+      </template>
+      <template v-else>
+        <div class="legend-item">
+          <span class="legend-color" style="background: var(--color-success)"></span>
+          <span>平均人数</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-color legend-dashed" style="border-color: var(--color-warning)"></span>
+          <span>最大人数</span>
+        </div>
+      </template>
     </div>
     
     <!-- 统计摘要 -->
-    <div v-if="historyData && historyData.data.length > 0" class="summary">
+    <div v-if="primarySummary" class="summary">
       <div class="summary-item">
         <span class="label">数据点数:</span>
-        <span class="value">{{ historyData.data.length }}</span>
+        <span class="value">{{ primarySummary.points }}</span>
       </div>
       <div class="summary-item">
         <span class="label">平均人数:</span>
         <span class="value">
-          {{ (historyData.data.reduce((sum, d) => sum + d.avg_count, 0) / historyData.data.length).toFixed(1) }}
+          {{ primarySummary.avg.toFixed(1) }}
         </span>
       </div>
       <div class="summary-item">
         <span class="label">最大人数:</span>
         <span class="value">
-          {{ Math.max(...historyData.data.map(d => d.max_count)) }}
+          {{ primarySummary.max }}
         </span>
       </div>
     </div>
@@ -444,9 +635,8 @@ onUnmounted(() => {
 <style scoped>
 .history-chart {
   padding: 16px;
-  background: #fff;
+  background: var(--color-panel);
   border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .controls {
@@ -455,7 +645,7 @@ onUnmounted(() => {
   gap: 16px;
   margin-bottom: 16px;
   padding-bottom: 16px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .control-group {
@@ -464,22 +654,35 @@ onUnmounted(() => {
   gap: 8px;
 }
 
+.control-group .hint {
+  font-size: 12px;
+  color: var(--color-text-subtle);
+}
+
 .control-group label {
   font-size: 14px;
-  color: #666;
+  color: var(--color-text-muted);
 }
 
 .control-group select,
 .control-group input {
   padding: 6px 12px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--color-border-strong);
   border-radius: 4px;
   font-size: 14px;
+  background: var(--color-input-bg);
+  color: var(--color-text);
+}
+
+.control-group select:focus,
+.control-group input:focus {
+  outline: none;
+  border-color: var(--color-primary);
 }
 
 .control-group button {
   padding: 6px 12px;
-  background: #2196F3;
+  background: var(--color-primary);
   color: white;
   border: none;
   border-radius: 4px;
@@ -488,24 +691,57 @@ onUnmounted(() => {
 }
 
 .control-group button:hover {
-  background: #1976D2;
+  background: var(--color-primary-strong);
 }
 
 .control-group button:disabled {
-  background: #ccc;
+  background: var(--color-border-strong);
   cursor: not-allowed;
+}
+
+.compare-group {
+  align-items: flex-start;
+  width: 100%;
+}
+
+.compare-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  max-width: 100%;
+}
+
+.compare-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--color-panel-alt);
+  border: 1px solid var(--color-border);
+}
+
+.compare-item input {
+  accent-color: var(--color-primary);
+}
+
+.compare-item span.primary {
+  color: var(--color-primary);
+  font-weight: 600;
 }
 
 .loading {
   text-align: center;
   padding: 40px;
-  color: #666;
+  color: var(--color-text-muted);
 }
 
 .error {
   padding: 12px;
-  background: #ffebee;
-  color: #c62828;
+  background: rgba(244, 67, 54, 0.2);
+  color: var(--color-danger);
   border-radius: 4px;
   margin-bottom: 16px;
 }
@@ -513,6 +749,9 @@ onUnmounted(() => {
 .chart-container {
   width: 100%;
   min-height: 300px;
+  background: var(--color-panel-alt);
+  border-radius: 8px;
+  padding: 16px;
 }
 
 .chart-container canvas {
@@ -523,6 +762,7 @@ onUnmounted(() => {
 .legend {
   display: flex;
   justify-content: center;
+  flex-wrap: wrap;
   gap: 24px;
   margin-top: 16px;
 }
@@ -532,7 +772,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   font-size: 14px;
-  color: #666;
+  color: var(--color-text-muted);
 }
 
 .legend-color {
@@ -552,7 +792,7 @@ onUnmounted(() => {
   gap: 32px;
   margin-top: 16px;
   padding-top: 16px;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--color-border);
 }
 
 .summary-item {
@@ -563,12 +803,25 @@ onUnmounted(() => {
 
 .summary-item .label {
   font-size: 12px;
-  color: #999;
+  color: var(--color-text-subtle);
 }
 
 .summary-item .value {
   font-size: 24px;
   font-weight: bold;
-  color: #333;
+  color: var(--color-text);
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: var(--color-text-subtle);
+}
+
+.empty-state p {
+  margin: 8px 0 0;
 }
 </style>

@@ -16,6 +16,7 @@ const props = defineProps<{
   streamId: string
   status?: string
   playbackDelaySec?: number
+  preferredProtocol?: 'auto' | 'webrtc' | 'flv' | 'hls'
 }>()
 
 const emit = defineEmits<{
@@ -31,12 +32,20 @@ const isPlaying = ref(false)
 const errorMessage = ref('')
 const videoRef = ref<HTMLVideoElement | null>(null)
 const isBuffering = ref(false)
+const latencyMs = ref<number | null>(null)
+const webrtcStats = ref({
+  jitter: 0,
+  framesDropped: 0,
+  framesPerSecond: 0
+})
 
 // 播放器实例
 let flvPlayer: flvjs.Player | null = null
 let hlsPlayer: Hls | null = null
 let rtcConnection: RTCPeerConnection | null = null
 let delayTimer: ReturnType<typeof setInterval> | null = null
+let latencyTimer: ReturnType<typeof setInterval> | null = null
+let webrtcStatsTimer: ReturnType<typeof setInterval> | null = null
 
 const DELAY_CHECK_INTERVAL_MS = 200
 const MIN_DELAY_MARGIN_SEC = 0.15
@@ -149,6 +158,8 @@ function cleanup() {
     delayTimer = null
   }
 
+  stopLatencyMonitor()
+
   if (videoRef.value) {
     videoRef.value.srcObject = null
     videoRef.value.src = ''
@@ -222,6 +233,57 @@ function startDelayControl(video: HTMLVideoElement, delaySec: number) {
       video.play().catch(() => {})
     }
   }, DELAY_CHECK_INTERVAL_MS)
+}
+
+function stopLatencyMonitor() {
+  if (latencyTimer) {
+    clearInterval(latencyTimer)
+    latencyTimer = null
+  }
+  if (webrtcStatsTimer) {
+    clearInterval(webrtcStatsTimer)
+    webrtcStatsTimer = null
+  }
+  latencyMs.value = null
+  webrtcStats.value = { jitter: 0, framesDropped: 0, framesPerSecond: 0 }
+}
+
+function startLatencyMonitor() {
+  stopLatencyMonitor()
+
+  if (!videoRef.value) return
+
+  latencyTimer = setInterval(() => {
+    if (!videoRef.value) return
+    if (currentProtocol.value === 'flv' || currentProtocol.value === 'hls') {
+      const bufferedEnd = getBufferedEnd(videoRef.value)
+      const latency = bufferedEnd - videoRef.value.currentTime
+      if (Number.isFinite(latency) && latency >= 0) {
+        latencyMs.value = Math.round(latency * 1000)
+      }
+    }
+  }, 500)
+
+  if (currentProtocol.value === 'webrtc' && rtcConnection) {
+    webrtcStatsTimer = setInterval(async () => {
+      if (!rtcConnection) return
+      try {
+        const stats = await rtcConnection.getStats()
+        stats.forEach((report) => {
+          const mediaType = report.kind || report.mediaType
+          if (report.type === 'inbound-rtp' && mediaType === 'video') {
+            webrtcStats.value = {
+              jitter: report.jitter || 0,
+              framesDropped: report.framesDropped || 0,
+              framesPerSecond: report.framesPerSecond || 0
+            }
+          }
+        })
+      } catch {
+        // ignore getStats errors
+      }
+    }, 1000)
+  }
 }
 
 // 尝试 WebRTC 播放 (WHEP 协议)
@@ -306,6 +368,7 @@ async function tryWebRTC(token: number): Promise<boolean> {
                 isPlaying.value = true
                 emit('playing')
                 emit('protocolChange', 'WebRTC')
+                startLatencyMonitor()
                 doResolve(true)
               }
             }).catch((err) => {
@@ -454,6 +517,7 @@ async function tryFlv(token: number): Promise<boolean> {
           isPlaying.value = true
           emit('playing')
           emit('protocolChange', 'HTTP-FLV')
+          startLatencyMonitor()
           resolve(true)
         } else {
           resolve(false)
@@ -498,6 +562,7 @@ async function tryHls(token: number): Promise<boolean> {
         isPlaying.value = true
         emit('playing')
         emit('protocolChange', 'HLS (Native)')
+        startLatencyMonitor()
         resolve(true)
       }
       
@@ -546,6 +611,7 @@ async function tryHls(token: number): Promise<boolean> {
         isPlaying.value = true
         emit('playing')
         emit('protocolChange', 'HLS')
+        startLatencyMonitor()
         resolve(true)
       })
 
@@ -577,43 +643,52 @@ async function startPlayback() {
   // Get current token for this playback attempt
   const token = playbackToken
 
-  // 协议优先级：WebRTC → HTTP-FLV → HLS
-  // WebRTC 延迟最低，适合实时监控
-  
-  // 1. 尝试 WebRTC (最低延迟)
-  if (urls.value?.webrtc && !(props.playbackDelaySec && props.playbackDelaySec > 0)) {
-    console.log('Trying WebRTC first (lowest latency)...')
-    if (await tryWebRTC(token)) {
-      return
-    }
-    // 清理失败的 WebRTC 连接
-    if (rtcConnection) {
-      rtcConnection.close()
-      rtcConnection = null
-    }
-  }
+  const preference = props.preferredProtocol ?? 'auto'
+  const baseOrder: Protocol[] = ['webrtc', 'flv', 'hls']
+  const order = preference === 'auto'
+    ? baseOrder
+    : [preference as Protocol, ...baseOrder.filter((p) => p !== preference)]
 
-  // 2. 尝试 HTTP-FLV (低延迟)
-  console.log('Trying HTTP-FLV...')
-  if (await tryFlv(token)) {
-    if (videoRef.value) {
-      startDelayControl(videoRef.value, props.playbackDelaySec ?? 0)
-    }
-    return
-  }
-  // 清理失败的 FLV 播放器
-  if (flvPlayer) {
-    flvPlayer.destroy()
-    flvPlayer = null
-  }
+  const skipWebRTCForDelay = preference === 'auto' && (props.playbackDelaySec ?? 0) > 0
 
-  // 3. 降级到 HLS (兼容性最好)
-  console.log('Trying HLS...')
-  if (await tryHls(token)) {
-    if (videoRef.value) {
-      startDelayControl(videoRef.value, props.playbackDelaySec ?? 0)
+  for (const protocol of order) {
+    if (protocol === 'webrtc') {
+      if (!urls.value?.webrtc || skipWebRTCForDelay) {
+        continue
+      }
+      console.log('Trying WebRTC...')
+      if (await tryWebRTC(token)) {
+        return
+      }
+      if (rtcConnection) {
+        rtcConnection.close()
+        rtcConnection = null
+      }
     }
-    return
+
+    if (protocol === 'flv') {
+      console.log('Trying HTTP-FLV...')
+      if (await tryFlv(token)) {
+        if (videoRef.value) {
+          startDelayControl(videoRef.value, props.playbackDelaySec ?? 0)
+        }
+        return
+      }
+      if (flvPlayer) {
+        flvPlayer.destroy()
+        flvPlayer = null
+      }
+    }
+
+    if (protocol === 'hls') {
+      console.log('Trying HLS...')
+      if (await tryHls(token)) {
+        if (videoRef.value) {
+          startDelayControl(videoRef.value, props.playbackDelaySec ?? 0)
+        }
+        return
+      }
+    }
   }
 
   // Check if this attempt is still valid before showing error
@@ -634,6 +709,15 @@ watch(
       startPlayback()
     } else {
       cleanup()
+    }
+  }
+)
+
+watch(
+  () => props.preferredProtocol,
+  () => {
+    if (props.playUrl) {
+      startPlayback()
     }
   }
 )
@@ -675,6 +759,16 @@ defineExpose({
       {{ currentProtocol.toUpperCase() }}
       <!-- 方案 F：服务端渲染流预计有 1-5 秒延迟 -->
       <span class="delay-hint">~1-5s</span>
+    </div>
+
+    <!-- 延迟/质量指标 -->
+    <div v-if="latencyMs !== null" class="latency-badge">
+      延迟 {{ latencyMs }} ms
+    </div>
+    <div v-if="currentProtocol === 'webrtc'" class="webrtc-metrics">
+      <span>FPS {{ webrtcStats.framesPerSecond }}</span>
+      <span>抖动 {{ webrtcStats.jitter.toFixed(2) }}</span>
+      <span>丢帧 {{ webrtcStats.framesDropped }}</span>
     </div>
 
     <!-- 状态指示器 -->
@@ -730,7 +824,7 @@ defineExpose({
   right: 8px;
   padding: 4px 8px;
   background: rgba(0, 0, 0, 0.7);
-  color: #4a9eff;
+  color: var(--color-primary);
   font-size: 12px;
   font-weight: 500;
   border-radius: 4px;
@@ -740,9 +834,33 @@ defineExpose({
 }
 
 .delay-hint {
-  color: #888;
+  color: var(--color-text-muted);
   font-size: 10px;
   font-weight: 400;
+}
+
+.latency-badge {
+  position: absolute;
+  top: 8px;
+  right: 110px;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.7);
+  color: var(--color-warning);
+  font-size: 11px;
+  border-radius: 4px;
+}
+
+.webrtc-metrics {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  display: flex;
+  gap: 8px;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.7);
+  color: var(--color-success);
+  font-size: 10px;
+  border-radius: 4px;
 }
 
 .status-badge {
@@ -757,23 +875,23 @@ defineExpose({
 }
 
 .status-badge.running {
-  color: #4caf50;
+  color: var(--color-success);
 }
 
 .status-badge.starting {
-  color: #ff9800;
+  color: var(--color-warning);
 }
 
 .status-badge.cooldown {
-  color: #2196f3;
+  color: var(--color-info);
 }
 
 .status-badge.error {
-  color: #f44336;
+  color: var(--color-danger);
 }
 
 .status-badge.stopped {
-  color: #9e9e9e;
+  color: var(--color-text-muted);
 }
 
 .buffering-indicator {
@@ -795,8 +913,8 @@ defineExpose({
 .buffering-spinner {
   width: 24px;
   height: 24px;
-  border: 2px solid #333;
-  border-top-color: #4a9eff;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }
@@ -821,8 +939,8 @@ defineExpose({
 .spinner {
   width: 40px;
   height: 40px;
-  border: 3px solid #333;
-  border-top-color: #4a9eff;
+  border: 3px solid var(--color-border);
+  border-top-color: var(--color-primary);
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }
@@ -844,7 +962,7 @@ defineExpose({
 .retry-btn {
   margin-top: 8px;
   padding: 8px 16px;
-  background: #4a9eff;
+  background: var(--color-primary);
   border: none;
   border-radius: 4px;
   color: #fff;
@@ -852,10 +970,10 @@ defineExpose({
 }
 
 .retry-btn:hover {
-  background: #3a8eef;
+  background: var(--color-primary-strong);
 }
 
 .no-source-overlay {
-  color: #888;
+  color: var(--color-text-muted);
 }
 </style>

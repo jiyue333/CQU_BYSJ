@@ -207,6 +207,7 @@ class ROICalculator:
         polygon: list[Point],
         thresholds: DensityThresholds,
         detections: list[Detection],
+        precomputed_area: Optional[float] = None,
     ) -> RegionStat:
         """计算单个区域的统计结果
         
@@ -221,7 +222,7 @@ class ROICalculator:
             区域统计结果
         """
         # 计算面积
-        area = cls.polygon_area(polygon)
+        area = precomputed_area if precomputed_area is not None else cls.polygon_area(polygon)
         
         # 统计区域内人数
         count = cls.count_detections_in_region(detections, polygon)

@@ -6,10 +6,13 @@
  */
 
 import { computed, ref, watch } from 'vue'
-import type { DetectionResult } from '@/types'
+import type { DetectionResult, StatusMetrics } from '@/types'
+import { submitFeedback } from '@/api/feedback'
 
 const props = defineProps<{
   result: DetectionResult | null
+  metrics?: StatusMetrics | null
+  streamId?: string | null
 }>()
 
 // 动画状态
@@ -42,6 +45,71 @@ const timestamp = computed(() => {
   if (!props.result?.timestamp) return null
   return new Date(props.result.timestamp * 1000).toLocaleTimeString()
 })
+
+const metrics = computed(() => props.metrics ?? null)
+
+const confidenceBuckets = computed(() => {
+  const buckets = Array.from({ length: 10 }, () => 0)
+  if (!props.result?.detections?.length) return buckets
+  for (const det of props.result.detections) {
+    const idx = Math.min(9, Math.floor(det.confidence * 10))
+    if (buckets[idx] !== undefined) {
+      buckets[idx] += 1
+    }
+  }
+  return buckets
+})
+
+const maxBucket = computed(() => Math.max(1, ...confidenceBuckets.value))
+
+const healthLabel = computed(() => {
+  const health = metrics.value?.health
+  if (!health) return '未知'
+  if (health === 'healthy') return '健康'
+  if (health === 'degraded') return '降级'
+  if (health === 'cooldown') return '冷却'
+  return '异常'
+})
+
+const healthColor = computed(() => {
+  const health = metrics.value?.health
+  if (health === 'healthy') return '#4caf50'
+  if (health === 'degraded') return '#ff9800'
+  if (health === 'cooldown') return '#2196f3'
+  return '#f44336'
+})
+
+const showFeedback = ref(false)
+const feedbackMessage = ref('')
+const feedbackSending = ref(false)
+const feedbackError = ref('')
+
+async function sendFeedback() {
+  if (!props.streamId) return
+  feedbackSending.value = true
+  feedbackError.value = ''
+  try {
+    await submitFeedback({
+      stream_id: props.streamId,
+      message: feedbackMessage.value.trim() || undefined,
+      payload: props.result
+        ? {
+            timestamp: props.result.timestamp,
+            total_count: props.result.total_count,
+            detection_count: props.result.detections.length,
+            frame_width: props.result.frame_width,
+            frame_height: props.result.frame_height
+          }
+        : {}
+    })
+    feedbackMessage.value = ''
+    showFeedback.value = false
+  } catch (err) {
+    feedbackError.value = err instanceof Error ? err.message : '提交失败'
+  } finally {
+    feedbackSending.value = false
+  }
+}
 
 // 监听总人数变化，触发动画
 watch(totalCount, (newVal, oldVal) => {
@@ -109,6 +177,68 @@ function formatDensity(density: number): string {
         </div>
       </div>
 
+      <!-- 状态指标 -->
+      <div v-if="metrics" class="metrics-card">
+        <div class="section-title">渲染状态</div>
+        <div class="metrics-grid">
+          <div class="metric-item">
+            <span class="metric-label">渲染 FPS</span>
+            <span class="metric-value">{{ metrics.render_fps_actual }}</span>
+          </div>
+          <div class="metric-item">
+            <span class="metric-label">推理 FPS</span>
+            <span class="metric-value">{{ metrics.infer_fps_actual }}</span>
+          </div>
+          <div class="metric-item">
+            <span class="metric-label">延迟</span>
+            <span class="metric-value">{{ metrics.latency_ms }} ms</span>
+          </div>
+          <div class="metric-item">
+            <span class="metric-label">健康</span>
+            <span class="metric-value" :style="{ color: healthColor }">{{ healthLabel }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 置信度分布 -->
+      <div class="confidence-card">
+        <div class="section-title">置信度分布</div>
+        <div class="confidence-bars">
+          <div
+            v-for="(count, idx) in confidenceBuckets"
+            :key="idx"
+            class="confidence-bar"
+          >
+            <div
+              class="confidence-fill"
+              :style="{ height: `${(count / maxBucket) * 100}%` }"
+            ></div>
+            <span class="confidence-label">{{ idx * 10 }}%</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 反馈入口 -->
+      <div class="feedback-card">
+        <div class="section-title">反馈入口</div>
+        <button class="feedback-toggle" @click="showFeedback = !showFeedback">
+          {{ showFeedback ? '取消反馈' : '提交反馈' }}
+        </button>
+        <div v-if="showFeedback" class="feedback-form">
+          <textarea
+            v-model="feedbackMessage"
+            class="feedback-input"
+            placeholder="描述问题或建议..."
+          ></textarea>
+          <div class="feedback-actions">
+            <span v-if="feedbackError" class="feedback-error">{{ feedbackError }}</span>
+            <button class="feedback-submit" :disabled="feedbackSending" @click="sendFeedback">
+              {{ feedbackSending ? '提交中...' : '提交' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- 区域统计列表 -->
       <div v-if="regionStats.length > 0" class="region-stats">
         <div class="section-title">区域密度</div>
@@ -166,7 +296,7 @@ function formatDensity(density: number): string {
 
 <style scoped>
 .stats-panel {
-  background: #1e1e1e;
+  background: var(--color-panel);
   border-radius: 12px;
   padding: 16px;
   display: flex;
@@ -183,13 +313,13 @@ function formatDensity(density: number): string {
 .panel-header h3 {
   margin: 0;
   font-size: 16px;
-  color: #fff;
+  color: var(--color-text);
   font-weight: 600;
 }
 
 .timestamp {
   font-size: 12px;
-  color: #888;
+  color: var(--color-text-muted);
   font-family: monospace;
 }
 
@@ -199,7 +329,7 @@ function formatDensity(density: number): string {
   align-items: center;
   justify-content: center;
   padding: 32px 16px;
-  color: #666;
+  color: var(--color-text-subtle);
 }
 
 .no-data .icon {
@@ -215,23 +345,23 @@ function formatDensity(density: number): string {
 
 /* 总人数卡片 */
 .total-count-card {
-  background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%);
+  background: linear-gradient(135deg, var(--color-panel-alt) 0%, var(--color-surface) 100%);
   border-radius: 10px;
   padding: 20px;
   text-align: center;
-  border: 1px solid #333;
+  border: 1px solid var(--color-border);
 }
 
 .count-label {
   font-size: 14px;
-  color: #888;
+  color: var(--color-text-muted);
   margin-bottom: 8px;
 }
 
 .count-value {
   font-size: 48px;
   font-weight: 700;
-  color: #4a9eff;
+  color: var(--color-primary);
   line-height: 1;
   transition: transform 0.15s ease;
 }
@@ -243,7 +373,7 @@ function formatDensity(density: number): string {
 .count-value .unit {
   font-size: 18px;
   font-weight: 400;
-  color: #888;
+  color: var(--color-text-muted);
   margin-left: 4px;
 }
 
@@ -254,9 +384,146 @@ function formatDensity(density: number): string {
   gap: 10px;
 }
 
+/* 状态指标 */
+.metrics-card {
+  background: var(--color-panel-alt);
+  border-radius: 8px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.metric-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.metric-label {
+  font-size: 11px;
+  color: var(--color-text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.metric-value {
+  font-size: 16px;
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+/* 置信度分布 */
+.confidence-card {
+  background: var(--color-panel-alt);
+  border-radius: 8px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+}
+
+.confidence-bars {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 6px;
+  margin-top: 10px;
+  align-items: end;
+}
+
+.confidence-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.confidence-fill {
+  width: 100%;
+  min-height: 4px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, var(--color-primary), var(--color-primary-strong));
+  transition: height 0.3s ease;
+}
+
+.confidence-label {
+  font-size: 9px;
+  color: var(--color-text-subtle);
+}
+
+/* 反馈入口 */
+.feedback-card {
+  background: var(--color-panel-alt);
+  border-radius: 8px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+}
+
+.feedback-toggle {
+  margin-top: 8px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 6px;
+  background: var(--color-border);
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.feedback-toggle:hover {
+  background: var(--color-border-strong);
+}
+
+.feedback-form {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.feedback-input {
+  min-height: 80px;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-input-bg);
+  color: var(--color-text);
+  font-size: 12px;
+  resize: vertical;
+}
+
+.feedback-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.feedback-error {
+  font-size: 11px;
+  color: var(--color-danger);
+}
+
+.feedback-submit {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 6px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.feedback-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .section-title {
   font-size: 13px;
-  color: #888;
+  color: var(--color-text-muted);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -270,7 +537,7 @@ function formatDensity(density: number): string {
 }
 
 .region-item:hover {
-  border-color: rgba(255, 255, 255, 0.1);
+  border-color: var(--color-border);
 }
 
 .region-info {
@@ -283,7 +550,7 @@ function formatDensity(density: number): string {
 .region-name {
   font-size: 14px;
   font-weight: 500;
-  color: #fff;
+  color: var(--color-text);
 }
 
 .density-badge {
@@ -307,20 +574,20 @@ function formatDensity(density: number): string {
 .data-value {
   font-size: 20px;
   font-weight: 600;
-  color: #fff;
+  color: var(--color-text);
   line-height: 1.2;
 }
 
 .data-label {
   font-size: 11px;
-  color: #666;
+  color: var(--color-text-subtle);
   margin-top: 2px;
 }
 
 /* 密度进度条 */
 .density-bar {
   height: 4px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--color-border);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -341,12 +608,12 @@ function formatDensity(density: number): string {
 }
 
 .no-regions .hint {
-  color: #666;
+  color: var(--color-text-subtle);
   font-size: 14px;
 }
 
 .no-regions .sub-hint {
-  color: #555;
+  color: var(--color-text-subtle);
   font-size: 12px;
   margin-top: 4px;
 }

@@ -7,6 +7,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.services.result_push_service import get_result_push_service
 from app.services.status_push_service import get_status_push_service
+from app.services.alert_service import get_alert_service
 
 router = APIRouter()
 
@@ -37,4 +38,11 @@ async def websocket_status(websocket: WebSocket):
     - 服务端推送 {"type": "status", "data": {"stream_id": "xxx", "status": "xxx", ...}}
     """
     service = get_status_push_service()
+    await service.subscribe(websocket)
+
+
+@router.websocket("/alerts")
+async def websocket_alerts(websocket: WebSocket):
+    """订阅告警事件推送"""
+    service = get_alert_service()
     await service.subscribe(websocket)

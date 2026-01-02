@@ -49,11 +49,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 启动 WebSocket 推送服务
     from app.services.result_push_service import get_result_push_service
     from app.services.status_push_service import get_status_push_service
+    from app.services.alert_service import get_alert_service
     logger.info("starting_websocket_push_services")
     result_push_service = get_result_push_service()
     status_push_service = get_status_push_service()
+    alert_service = get_alert_service()
     await result_push_service.start()
     await status_push_service.start()
+    await alert_service.start()
     logger.info("websocket_push_services_started")
     
     # 启动历史数据存储服务
@@ -73,6 +76,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("stopping_websocket_push_services")
     await result_push_service.stop()
     await status_push_service.stop()
+    await alert_service.stop()
     
     # 停止历史数据存储服务
     logger.info("stopping_history_storage_service")
@@ -111,10 +115,13 @@ async def health_check() -> dict[str, str]:
 
 
 # 注册路由
-from app.api import config, files, history, rois, streams, websockets
+from app.api import config, files, history, rois, roi_templates, streams, websockets, alerts, feedback
 app.include_router(streams.router, prefix="/api/streams", tags=["streams"])
 app.include_router(rois.router, prefix="/api/streams", tags=["rois"])
+app.include_router(roi_templates.router, prefix="/api/rois", tags=["rois"])
 app.include_router(history.router, prefix="/api/streams", tags=["history"])
 app.include_router(files.router, prefix="/api/files", tags=["files"])
 app.include_router(config.router, prefix="/api/config", tags=["config"])
+app.include_router(alerts.router, prefix="/api/alerts", tags=["alerts"])
+app.include_router(feedback.router, prefix="/api/feedback", tags=["feedback"])
 app.include_router(websockets.router, prefix="/ws", tags=["websockets"])

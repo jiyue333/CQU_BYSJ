@@ -21,6 +21,14 @@
 
 ---
 
+## 现实现状态（与代码一致）
+
+- 渲染流命名：`{stream_id}_heatmap`，play_url 直接返回渲染流地址。
+- 渲染服务：`render_main.py` 独立进程，RenderWorker 使用 ffmpeg 拉 RTSP/推 RTMP。
+- 结果写入：`result:{stream_id}` 与 `latest_result:{stream_id}`。
+- 状态流：复用 `inference:status`（未另建 render:status）。
+- 容器内 RTSP/RTMP 已补充 `vhost=__defaultVhost__`，避免 \"no such stream\"。
+
 ## Phase 1: 基础设施与配置（F-01 ~ F-03）
 
 ### F-01 方案F改造决策与范围锁定

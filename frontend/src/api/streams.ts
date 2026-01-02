@@ -8,43 +8,13 @@ import type {
   VideoStreamListResponse,
   VideoStreamCreate,
   VideoStreamStart,
-  DetectionResult,
-  ApiError
+  DetectionResult
 } from '@/types'
+import { handleResponse } from './request'
 
 const API_BASE = '/api/streams'
 
-class ApiRequestError extends Error {
-  status: number
-  detail: string
-  
-  constructor(status: number, detail: string) {
-    super(detail)
-    this.name = 'ApiRequestError'
-    this.status = status
-    this.detail = detail
-  }
-}
-
-async function handleResponse<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    let detail = `HTTP ${response.status}`
-    try {
-      const error: ApiError = await response.json()
-      detail = error.detail || detail
-    } catch {
-      // ignore JSON parse error
-    }
-    throw new ApiRequestError(response.status, detail)
-  }
-  
-  // Handle 204 No Content
-  if (response.status === 204) {
-    return undefined as T
-  }
-  
-  return response.json()
-}
+// ApiRequestError and handleResponse moved to ./request
 
 /**
  * 创建视频流
@@ -121,4 +91,4 @@ export async function deleteStream(streamId: string): Promise<void> {
   return handleResponse<void>(response)
 }
 
-export { ApiRequestError }
+

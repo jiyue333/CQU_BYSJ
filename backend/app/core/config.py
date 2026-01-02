@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     render_ffmpeg_preset: str = "ultrafast"
     render_ffmpeg_tune: str = "zerolatency"
 
+    # 告警与指标配置
+    default_alert_cooldown_sec: int = 60
+    metrics_push_interval_sec: int = 2
+
     # getSnap 配置
     snap_timeout_sec: float = 2.0
     snap_max_failures: int = 5

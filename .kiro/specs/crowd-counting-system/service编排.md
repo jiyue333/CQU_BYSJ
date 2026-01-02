@@ -1,106 +1,58 @@
-## 当前服务与职责（只含视频流管理）
+## 当前服务与职责（方案 F）
 
 ### 1) 前端 Web（浏览器）
 
-- 让用户选择 / 填写输入源（都在浏览器完成）
-  - 本地视频文件（选择并上传）
-  - 浏览器摄像头（授权采集）
-  - RTSP 摄像头地址（用户在页面输入）
-- 发起 “开始播放 / 停止播放”（对用户是一个按钮）
-- 播放画面（拿到的是 “后端给的播放地址 / 会话信息”，用户不感知网关）
+- 选择输入源：本地视频文件、浏览器摄像头、RTSP 地址
+- 发起开始/停止/删除
+- 播放渲染流（WebRTC 优先，HTTP-FLV/HLS 兜底）
+- 展示实时统计（总人数、状态）
 
-> 前端不需要理解网关，只跟 “控制面后端” 交互。
+### 2) 控制面后端（Stream Manager）
 
-------
+- 统一入口：创建/启动/停止/删除流
+- 编排 ZLMediaKit：
+  - RTSP：调用 ZLM 代理拉流
+  - 文件：调用 ZLM ffmpeg 转流
+  - 摄像头：生成 WebRTC ingest 会话
+- 默认启动渲染服务：通过 Redis PubSub 向 `render:control` 发布 START/STOP
+- play_url/webrtc_url 返回渲染流 `{stream_id}_heatmap`
+- 监听 Redis Streams，推送结果与状态到 WebSocket
 
-### 2) 控制面后端（Stream Manager：API + WS / 信令编排）
+### 3) 渲染服务（RenderWorker）
 
-- **统一入口**：接收前端的 “创建流/开始/停止” 请求，返回一个统一的 `stream_id`
-- **隐藏网关**：把网关的地址、鉴权、协议细节（WebRTC/WHEP/WHIP/HLS 等）都封装起来
-- **编排网关**：根据输入源类型执行不同动作：
-  - RTSP：调用网关 API 让它去 **pull RTSP** 并生成 `stream_id`
-  - 视频文件：接收上传→存储→通知网关把该文件 “转成可播放的流”（生成 `stream_id`）
-  - 浏览器摄像头：下发发布会话信息，让浏览器把流 **publish 到网关**（生成 `stream_id`）
-- **生命周期管理**：维护 `stream_id` 的状态（starting/running/stopped/error），并负责回收（无人播放时停流、失败时 cooldown）
-- **通知推理服务**：某路 `stream_id` 进入 running 后，通知推理服务开始按频率抓 snap；停止时通知停止
+- 订阅 `render:control`，启动/停止渲染循环
+- ffmpeg 拉取原始 RTSP → YOLO 推理 → 热力图叠加 → ffmpeg 推 RTMP
+- 结果写入 `result:{stream_id}` 与 `latest_result:{stream_id}`
+- 状态写入 `inference:status`（供 StatusPushService 复用）
 
-------
+### 4) 媒体网关（ZLMediaKit）
 
-### 3) 媒体网关（开源：只做媒体，不做业务）
+- 接入原始视频流
+- 对外提供 WebRTC/HTTP-FLV/HLS 播放
+- 接收渲染服务推回的 RTMP 流，形成 `{stream_id}_heatmap`
 
-- 接入/生成 “浏览器可播” 的播放流（WebRTC/HLS/FLV 等）
-- 对 RTSP 源：负责拉流、重连、保活（媒体层的稳定性）
-- 对视频文件：负责把文件变成 “可播放流”（按实时节奏或按需）
-- 对浏览器摄像头：接受浏览器 publish 的流（WebRTC ingest）
-- 对外提供：
-  - **播放接口**（给浏览器看）
-  - **截图接口 getSnap (stream_id)**（给推理抓帧）
+### 5) Redis / PostgreSQL
 
-------
+- Redis: render control / results / status
+- PostgreSQL: stream/config/history 数据存储
 
-### 4) 推理服务（只做取帧与处理入口，不含展示逻辑）
+---
 
-- 接收控制面后端的 START / STOP 指令（按 `stream_id`）
-- 对每个运行中的 `stream_id`：按 1–3fps 调用网关 `getSnap(stream_id)` 取 JPEG bytes（只保最新，忙就丢）
-- （后续推理怎么做你们已有方案，这里不展开）
-
-------
-
-## 整体数据链路图（含：视频文件 + 浏览器摄像头 + RTSP）
-
-> 统一关键：所有源最终都在网关里变成同一个抽象：`stream_id`
->  浏览器播放用它，推理抓 snap 也用它。
+## 数据链路（简化版）
 
 ```
-┌────────────────────────────┐
-│        浏览器前端 Web        │
-│  - 选择视频文件 / 摄像头 / RTSP│
-│  - 点击开始/停止              │
-└──────────────┬─────────────┘
-               │(1) create/start/stop 请求
-               ▼
-┌────────────────────────────┐
-│   控制面后端 Stream Manager  │
-│ - 生成/维护 stream_id         │
-│ - 隐藏网关细节、编排网关       │
-│ - running 时通知推理 START     │
-└───────┬───────────┬────────┘
-        │           │
-        │(2a) 视频文件上传          (2b) RTSP 配置 / (2c) 摄像头发布会话
-        │           │
-        ▼           ▼
-   ┌───────────┐   ┌────────────────────────────┐
-   │ 文件存储/对象存储│   │        媒体网关（开源）        │
-   │ (保存用户上传视频)│   │ - RTSP pull / 文件转流 / 摄像头 ingest│
-   └─────┬─────┘   │ - 对外：播放接口 + getSnap(stream_id) │
-         │         └───────────┬──────────────┘
-         │(3a) 通知网关把文件转成 stream_id        │(4) 播放
-         └──────────────────────►               ▼
-                                     ┌────────────────────┐
-                                     │   浏览器播放（video） │
-                                     │  （用户不感知网关）    │
-                                     └────────────────────┘
-
-同时推理链路：
-┌────────────────────────────┐
-│        推理服务（Worker）     │
-│ - 收到 START(stream_id,fps)  │
-│ - 循环调 getSnap(stream_id)   │
-└──────────────┬─────────────┘
-               │(5) getSnap(stream_id)
-               ▼
-        ┌────────────────────────────┐
-        │          媒体网关            │
-        │  返回 JPEG bytes（快照）      │
-        └────────────────────────────┘
+前端 create/start
+  → 后端 Stream Manager
+    → ZLM 生成原始流
+    → 发布 render:control START
+      → RenderWorker 拉 RTSP + 推 RTMP
+        → ZLM 生成渲染流 {stream_id}_heatmap
+前端播放渲染流
+后端通过 Redis Streams 推送结果/状态
 ```
 
-------
+## 关键约定
 
-## 三类输入在 “用户不感知网关” 的统一方式（你实现时最重要）
-
-- **视频文件**：浏览器上传给后端 → 后端存储 → 后端让网关把它 “变成一个 stream_id 可播放流”
-- **浏览器摄像头**：浏览器采集 → 后端给 “发布会话” → 浏览器 publish 到网关 → 网关生成同一个 `stream_id`
-- **RTSP 摄像头**：浏览器提交 RTSP 信息给后端 → 后端让网关 pull RTSP → 网关生成同一个 `stream_id`
-
-最终前端永远只认：**stream_id / play_url**，推理永远只认：**getSnap(stream_id)**。
+- 渲染流命名：`{stream_id}_heatmap`
+- 外部播放地址由 `ZLM_EXTERNAL_URL` 生成
+- 容器内拉/推流使用 `ZLM_BASE_URL` 推导 host，并补充 `vhost=__defaultVhost__`

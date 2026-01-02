@@ -17,9 +17,38 @@ from app.models.video_stream import VideoStream
 from app.schemas.system_config import (
     SystemConfigResponse,
     SystemConfigUpdate,
+    ConfigPresetListResponse,
 )
 
 router = APIRouter()
+
+# 配置预设（静态）
+CONFIG_PRESETS = [
+    {
+        "id": "balanced",
+        "name": "均衡",
+        "render_fps": 24,
+        "render_infer_stride": 3,
+        "heatmap_decay": 0.5,
+        "render_overlay_alpha": 0.4,
+    },
+    {
+        "id": "low_latency",
+        "name": "低延迟",
+        "render_fps": 30,
+        "render_infer_stride": 2,
+        "heatmap_decay": 0.6,
+        "render_overlay_alpha": 0.45,
+    },
+    {
+        "id": "stable",
+        "name": "稳态",
+        "render_fps": 20,
+        "render_infer_stride": 4,
+        "heatmap_decay": 0.7,
+        "render_overlay_alpha": 0.35,
+    },
+]
 
 
 async def _get_or_create_config(
@@ -54,6 +83,17 @@ async def _get_or_create_config(
         await db.refresh(config)
     
     return config
+
+
+@router.get(
+    "/presets",
+    response_model=ConfigPresetListResponse,
+    summary="获取配置预设",
+    description="返回可选的配置预设列表"
+)
+async def list_config_presets() -> ConfigPresetListResponse:
+    """获取配置预设列表"""
+    return ConfigPresetListResponse(presets=CONFIG_PRESETS, total=len(CONFIG_PRESETS))
 
 
 @router.get(

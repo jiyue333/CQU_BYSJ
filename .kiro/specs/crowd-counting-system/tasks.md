@@ -2,13 +2,19 @@
 
 ## 概述
 
-基于 YOLO 的实时人流计数与密度分析系统实现计划。采用播放帧率与推理频率解耦的设计，后端使用 FastAPI + Redis，前端使用 Vue 3，媒体网关使用 ZLMediaKit。
+基于 YOLO 的实时人流计数与密度分析系统实现计划。当前实现采用**方案 F（服务端渲染热力图）**，播放流为 `{stream_id}_heatmap`，前端不再做 Canvas 叠加。
+
+## 当前实现补充
+
+- 渲染由 `render_main.py` 独立服务完成：ffmpeg 拉 RTSP → 推理 → 叠加 → 推 RTMP。
+- 结果与状态通过 Redis Streams 推送到 WebSocket。
+- 前端已实现播放/统计/配置面板，但 ROI 与历史图表尚未接入。
 
 ## 技术栈
 
 - **后端**: Python 3.11+, FastAPI, Redis, PostgreSQL
 - **前端**: Vue 3, TypeScript, flv.js, hls.js, Canvas API
-- **推理**: YOLOv8n (Ultralytics)
+- **推理**: YOLOv8n (Ultralytics) + RenderWorker
 - **媒体网关**: ZLMediaKit
 - **测试**: pytest, pytest-asyncio, hypothesis (属性测试)
 

@@ -8,6 +8,8 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.schemas.roi import DensityThresholds
+
 
 class SystemConfigBase(BaseModel):
     """系统配置基础 Schema"""
@@ -34,6 +36,10 @@ class SystemConfigBase(BaseModel):
         ge=0.0, 
         le=1.0, 
         description="热力图衰减因子（EMA alpha, 0-1，值越大衰减越快）"
+    )
+    default_density_thresholds: DensityThresholds = Field(
+        default_factory=DensityThresholds,
+        description="默认密度阈值配置"
     )
     # 方案 F 渲染配置
     render_fps: int = Field(
@@ -103,6 +109,10 @@ class SystemConfigUpdate(BaseModel):
         le=1.0, 
         description="热力图衰减因子"
     )
+    default_density_thresholds: Optional[DensityThresholds] = Field(
+        None,
+        description="默认密度阈值配置"
+    )
     # 方案 F 渲染配置
     render_fps: Optional[int] = Field(
         None,
@@ -162,3 +172,19 @@ class GlobalConfigResponse(BaseModel):
     render_infer_stride: int = Field(3, description="推理步长")
     render_overlay_alpha: float = Field(0.4, description="热力图叠加透明度")
     render_max_concurrent: int = Field(2, description="最大并发渲染数")
+
+
+class ConfigPreset(BaseModel):
+    """配置预设"""
+    id: str = Field(..., description="预设 ID")
+    name: str = Field(..., description="预设名称")
+    render_fps: int = Field(..., description="渲染输出帧率")
+    render_infer_stride: int = Field(..., description="推理步长")
+    heatmap_decay: float = Field(..., description="热力图衰减因子")
+    render_overlay_alpha: float = Field(..., description="热力图透明度")
+
+
+class ConfigPresetListResponse(BaseModel):
+    """配置预设列表响应"""
+    presets: list[ConfigPreset] = Field(..., description="预设列表")
+    total: int = Field(..., description="总数")

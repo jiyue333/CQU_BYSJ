@@ -21,6 +21,10 @@ from app.schemas.roi import (
     ROIUpdate,
     ROIResponse,
     ROIListResponse,
+    ROITemplate,
+    ROITemplateRegion,
+    ROITemplateListResponse,
+    ROIPresetRequest,
 )
 from app.schemas.detection import (
     DensityLevel,
@@ -34,6 +38,8 @@ from app.schemas.system_config import (
     SystemConfigUpdate,
     SystemConfigResponse,
     GlobalConfigResponse,
+    ConfigPreset,
+    ConfigPresetListResponse,
 )
 from app.schemas.history_stat import (
     AggregationGranularity,
@@ -44,6 +50,21 @@ from app.schemas.history_stat import (
     HistoryListResponse,
     AggregatedStat,
     AggregatedHistoryResponse,
+)
+from app.schemas.alert import (
+    AlertThresholdType,
+    AlertLevel,
+    AlertRuleBase,
+    AlertRuleCreate,
+    AlertRuleUpdate,
+    AlertRuleResponse,
+    AlertRuleListResponse,
+    AlertEventResponse,
+    AlertEventListResponse,
+)
+from app.schemas.feedback import (
+    FeedbackCreate,
+    FeedbackResponse,
 )
 
 __all__ = [
@@ -64,6 +85,10 @@ __all__ = [
     "ROIUpdate",
     "ROIResponse",
     "ROIListResponse",
+    "ROITemplate",
+    "ROITemplateRegion",
+    "ROITemplateListResponse",
+    "ROIPresetRequest",
     # Detection
     "DensityLevel",
     "Detection",
@@ -75,6 +100,8 @@ __all__ = [
     "SystemConfigUpdate",
     "SystemConfigResponse",
     "GlobalConfigResponse",
+    "ConfigPreset",
+    "ConfigPresetListResponse",
     # HistoryStat
     "AggregationGranularity",
     "HistoryStatBase",
@@ -84,4 +111,17 @@ __all__ = [
     "HistoryListResponse",
     "AggregatedStat",
     "AggregatedHistoryResponse",
+    # Alert
+    "AlertThresholdType",
+    "AlertLevel",
+    "AlertRuleBase",
+    "AlertRuleCreate",
+    "AlertRuleUpdate",
+    "AlertRuleResponse",
+    "AlertRuleListResponse",
+    "AlertEventResponse",
+    "AlertEventListResponse",
+    # Feedback
+    "FeedbackCreate",
+    "FeedbackResponse",
 ]

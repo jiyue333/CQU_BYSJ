@@ -81,6 +81,26 @@ export interface RegionStat {
   level: DensityLevel
 }
 
+export interface DensityThresholds {
+  low: number
+  medium: number
+  high: number
+}
+
+export interface Point {
+  x: number
+  y: number
+}
+
+export interface StatusMetrics {
+  render_fps_actual: number
+  infer_fps_actual: number
+  last_frame_ts?: number
+  latency_ms: number
+  health: 'healthy' | 'degraded' | 'cooldown' | 'error'
+  state: StreamStatus
+}
+
 // 完整检测结果
 export interface DetectionResult {
   stream_id: string
@@ -122,12 +142,13 @@ export interface FileListResponse {
 
 // WebSocket 消息类型
 export interface WsMessage {
-  type: 'ping' | 'pong' | 'result' | 'recovery' | 'recovery_complete' | 'recover' | 'status'
+  type: 'ping' | 'pong' | 'result' | 'recovery' | 'recovery_complete' | 'recover' | 'status' | 'alert'
   ts?: number
   msg_id?: string
   data?: DetectionResult | StreamStatusUpdate
   last_id?: string
   count?: number
+  event?: AlertEvent
 }
 
 // 流状态更新
@@ -136,6 +157,79 @@ export interface StreamStatusUpdate {
   status: StreamStatus
   play_url?: string
   error?: string
+  metrics?: StatusMetrics
+  event?: string
+  timestamp?: number
+}
+
+export interface AlertRule {
+  id: string
+  stream_id: string
+  roi_id?: string | null
+  threshold_type: 'count' | 'density'
+  threshold_value?: number | null
+  level: DensityLevel
+  min_duration_sec: number
+  cooldown_sec: number
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface AlertEvent {
+  id: string
+  rule_id?: string | null
+  stream_id: string
+  roi_id?: string | null
+  level: DensityLevel
+  start_ts: number
+  end_ts?: number | null
+  peak_density: number
+  count_peak: number
+  message?: string | null
+  acknowledged: boolean
+}
+
+export interface AlertRuleListResponse {
+  rules: AlertRule[]
+  total: number
+}
+
+export interface AlertEventListResponse {
+  events: AlertEvent[]
+  total: number
+}
+
+export interface ROITemplateRegion {
+  name: string
+  points: Point[]
+}
+
+export interface ROITemplate {
+  id: string
+  name: string
+  description: string
+  tags: string[]
+  regions: ROITemplateRegion[]
+}
+
+export interface ROITemplateListResponse {
+  templates: ROITemplate[]
+  total: number
+}
+
+export interface ConfigPreset {
+  id: string
+  name: string
+  render_fps: number
+  render_infer_stride: number
+  heatmap_decay: number
+  render_overlay_alpha: number
+}
+
+export interface ConfigPresetListResponse {
+  presets: ConfigPreset[]
+  total: number
 }
 
 // API 错误响应
@@ -149,6 +243,8 @@ export interface SystemConfig {
   stream_id: string
   confidence_threshold: number
   heatmap_grid_size: number
+  heatmap_decay: number
+  default_density_thresholds: DensityThresholds
   // 方案 F 渲染配置
   render_fps: number
   render_infer_stride: number
@@ -156,14 +252,14 @@ export interface SystemConfig {
   // 已废弃字段（保留向后兼容）
   /** @deprecated 方案 F 使用 render_infer_stride */
   inference_fps?: number
-  /** @deprecated 方案 F 无前端 EMA 平滑 */
-  heatmap_decay?: number
 }
 
 // 系统配置更新请求
 export interface SystemConfigUpdate {
   confidence_threshold?: number
   heatmap_grid_size?: number
+  heatmap_decay?: number
+  default_density_thresholds?: DensityThresholds
   // 方案 F 渲染配置
   render_fps?: number
   render_infer_stride?: number

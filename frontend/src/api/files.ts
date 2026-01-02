@@ -3,40 +3,12 @@
  * Requirements: 1.1
  */
 
-import type { FileUploadResponse, FileListResponse, FileInfo, ApiError } from '@/types'
+import type { FileUploadResponse, FileListResponse, FileInfo } from '@/types'
+import { handleResponse, ApiRequestError } from './request'
 
 const API_BASE = '/api/files'
 
-class ApiRequestError extends Error {
-  status: number
-  detail: string
-  
-  constructor(status: number, detail: string) {
-    super(detail)
-    this.name = 'ApiRequestError'
-    this.status = status
-    this.detail = detail
-  }
-}
-
-async function handleResponse<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    let detail = `HTTP ${response.status}`
-    try {
-      const error: ApiError = await response.json()
-      detail = error.detail || detail
-    } catch {
-      // ignore JSON parse error
-    }
-    throw new ApiRequestError(response.status, detail)
-  }
-
-  if (response.status === 204) {
-    return undefined as T
-  }
-
-  return response.json()
-}
+// ApiRequestError and handleResponse moved to ./request
 
 /**
  * 上传视频文件
@@ -114,4 +86,4 @@ export async function deleteFile(fileId: string): Promise<void> {
   return handleResponse<void>(response)
 }
 
-export { ApiRequestError }
+

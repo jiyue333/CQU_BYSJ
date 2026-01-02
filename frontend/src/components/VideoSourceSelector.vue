@@ -254,7 +254,7 @@ function formatFileSize(bytes: number): string {
 <style scoped>
 .video-source-selector {
   padding: 16px;
-  background: #1a1a1a;
+  background: var(--color-panel);
   border-radius: 8px;
   max-width: 400px;
 }
@@ -262,7 +262,7 @@ function formatFileSize(bytes: number): string {
 h3 {
   margin: 0 0 16px;
   font-size: 18px;
-  color: #fff;
+  color: var(--color-text);
 }
 
 .source-type-tabs {
@@ -274,22 +274,22 @@ h3 {
 .source-type-tabs button {
   flex: 1;
   padding: 10px;
-  border: 1px solid #333;
-  background: #2a2a2a;
-  color: #888;
+  border: 1px solid var(--color-border);
+  background: var(--color-panel-alt);
+  color: var(--color-text-muted);
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .source-type-tabs button:hover {
-  background: #333;
-  color: #fff;
+  background: var(--color-panel-hover);
+  color: var(--color-text);
 }
 
 .source-type-tabs button.active {
-  background: #4a9eff;
-  border-color: #4a9eff;
+  background: var(--color-primary);
+  border-color: var(--color-primary);
   color: #fff;
 }
 
@@ -307,26 +307,26 @@ h3 {
 
 .form-group label {
   font-size: 14px;
-  color: #aaa;
+  color: var(--color-text-muted);
 }
 
 .form-group input[type='text'] {
   padding: 10px 12px;
-  border: 1px solid #333;
-  background: #2a2a2a;
-  color: #fff;
+  border: 1px solid var(--color-input-border);
+  background: var(--color-input-bg);
+  color: var(--color-text);
   border-radius: 6px;
   font-size: 14px;
 }
 
 .form-group input[type='text']:focus {
   outline: none;
-  border-color: #4a9eff;
+  border-color: var(--color-primary);
 }
 
 .file-select-area {
   padding: 20px;
-  border: 2px dashed #333;
+  border: 2px dashed var(--color-border);
   border-radius: 6px;
   text-align: center;
   cursor: pointer;
@@ -334,31 +334,31 @@ h3 {
 }
 
 .file-select-area:hover {
-  border-color: #4a9eff;
+  border-color: var(--color-primary);
   background: rgba(74, 158, 255, 0.1);
 }
 
 .file-name {
   display: block;
-  color: #fff;
+  color: var(--color-text);
   font-weight: 500;
 }
 
 .file-size {
   display: block;
-  color: #888;
+  color: var(--color-text-muted);
   font-size: 12px;
   margin-top: 4px;
 }
 
 .placeholder {
   display: block;
-  color: #888;
+  color: var(--color-text-muted);
 }
 
 .hint {
   display: block;
-  color: #666;
+  color: var(--color-text-subtle);
   font-size: 12px;
   margin-top: 4px;
 }
@@ -366,14 +366,14 @@ h3 {
 .progress-bar {
   position: relative;
   height: 20px;
-  background: #2a2a2a;
+  background: var(--color-panel-alt);
   border-radius: 4px;
   overflow: hidden;
 }
 
 .progress {
   height: 100%;
-  background: #4a9eff;
+  background: var(--color-primary);
   transition: width 0.3s;
 }
 
@@ -388,14 +388,14 @@ h3 {
 
 .webcam-info {
   padding: 20px;
-  background: #2a2a2a;
+  background: var(--color-panel-alt);
   border-radius: 6px;
   text-align: center;
 }
 
 .webcam-info p {
   margin: 0;
-  color: #fff;
+  color: var(--color-text);
 }
 
 .webcam-info .hint {
@@ -405,15 +405,15 @@ h3 {
 .error-message {
   padding: 10px;
   background: rgba(255, 77, 77, 0.1);
-  border: 1px solid #ff4d4d;
+  border: 1px solid var(--color-danger);
   border-radius: 6px;
-  color: #ff4d4d;
+  color: var(--color-danger);
   font-size: 14px;
 }
 
 .submit-btn {
   padding: 12px;
-  background: #4a9eff;
+  background: var(--color-primary);
   border: none;
   border-radius: 6px;
   color: #fff;
@@ -424,12 +424,12 @@ h3 {
 }
 
 .submit-btn:hover:not(:disabled) {
-  background: #3a8eef;
+  background: var(--color-primary-strong);
 }
 
 .submit-btn:disabled {
-  background: #333;
-  color: #666;
+  background: var(--color-border);
+  color: var(--color-text-subtle);
   cursor: not-allowed;
 }
 </style>

@@ -26,12 +26,17 @@ import cv2
 import numpy as np
 import redis.asyncio as redis
 import structlog
+from sqlalchemy import select
 
 from app.core.config import settings
+from app.core.database import async_session_maker
 from app.core.redis import get_redis
-from app.schemas.detection import Detection, DetectionResult
+from app.schemas.detection import Detection, DetectionResult, RegionStat
+from app.schemas.roi import DensityThresholds, Point
 from app.services.heatmap_generator import HeatmapGenerator
 from app.services.inference_service import InferenceService, get_inference_service
+from app.services.roi_calculator import ROICalculator
+from app.models.roi import ROI
 
 logger = structlog.get_logger(__name__)
 
@@ -55,6 +60,33 @@ class RenderConfig:
     overlay_alpha: float = 0.4
 
 
+@dataclass
+class CachedROI:
+    """缓存的 ROI 配置"""
+    roi_id: str
+    name: str
+    points: list[Point]
+    thresholds: DensityThresholds
+    area: float
+
+
+@dataclass
+class ROICacheEntry:
+    """ROI 缓存条目"""
+    rois: list[CachedROI]
+    fetched_at: float
+
+
+@dataclass
+class RenderMetricsState:
+    """渲染指标状态"""
+    last_report_ts: float
+    frame_count: int = 0
+    infer_count: int = 0
+    last_frame_ts: Optional[float] = None
+    last_latency_ms: float = 0.0
+
+
 class RenderWorker:
     """渲染循环 Worker
     
@@ -70,6 +102,7 @@ class RenderWorker:
     STATUS_STREAM = "inference:status"  # 复用现有 Stream
     RESULT_STREAM_PREFIX = "result:"
     LATEST_RESULT_PREFIX = "latest_result:"
+    ROI_UPDATED_CHANNEL = "roi:updated"
     
     # 指令过期时间（秒）
     CMD_EXPIRE_SEC = 30
@@ -79,6 +112,8 @@ class RenderWorker:
     MAX_FAILURES = 5
     # COOLDOWN 持续时间（秒）
     COOLDOWN_DURATION = 60
+    # ROI 缓存 TTL（秒）
+    ROI_CACHE_TTL = 5
     
     def __init__(
         self,
@@ -116,6 +151,15 @@ class RenderWorker:
         
         # 热力图生成器
         self._heatmap_generator: Optional[HeatmapGenerator] = None
+
+        # ROI 缓存与订阅
+        self._roi_cache: dict[str, ROICacheEntry] = {}
+        self._roi_cache_lock: Optional[asyncio.Lock] = None
+        self._roi_pubsub: Optional[redis.client.PubSub] = None
+        self._roi_listener_task: Optional[asyncio.Task] = None
+
+        # 渲染指标状态
+        self._metrics_state: dict[str, RenderMetricsState] = {}
     
     @property
     def inference_service(self) -> InferenceService:
@@ -149,6 +193,7 @@ class RenderWorker:
         # 初始化锁
         self._inference_lock = asyncio.Lock()
         self._stream_lock = asyncio.Lock()
+        self._roi_cache_lock = asyncio.Lock()
         
         # 预加载模型
         self.inference_service.load_model()
@@ -156,6 +201,9 @@ class RenderWorker:
         
         # 启动控制指令监听
         asyncio.create_task(self._listen_control_channel())
+
+        # 启动 ROI 更新订阅
+        self._roi_listener_task = asyncio.create_task(self._listen_roi_updates())
         
         # 启动指令缓存清理任务
         asyncio.create_task(self._cleanup_cmd_cache())
@@ -176,6 +224,18 @@ class RenderWorker:
             await self._pubsub.unsubscribe(self.CONTROL_CHANNEL)
             await self._pubsub.close()
             self._pubsub = None
+
+        if self._roi_pubsub:
+            await self._roi_pubsub.unsubscribe(self.ROI_UPDATED_CHANNEL)
+            await self._roi_pubsub.close()
+            self._roi_pubsub = None
+
+        if self._roi_listener_task:
+            self._roi_listener_task.cancel()
+            try:
+                await self._roi_listener_task
+            except asyncio.CancelledError:
+                pass
         
         logger.info("render_worker_stopped")
     
@@ -202,6 +262,107 @@ class RenderWorker:
             except Exception as e:
                 logger.error("control_channel_error", error=str(e))
                 await asyncio.sleep(1)
+
+    async def _listen_roi_updates(self) -> None:
+        """监听 ROI 更新通知，刷新缓存"""
+        client = await self._get_redis()
+        self._roi_pubsub = client.pubsub()
+        await self._roi_pubsub.subscribe(self.ROI_UPDATED_CHANNEL)
+
+        logger.info("listening_roi_updates", channel=self.ROI_UPDATED_CHANNEL)
+
+        while self._running:
+            try:
+                message = await self._roi_pubsub.get_message(
+                    ignore_subscribe_messages=True,
+                    timeout=1.0
+                )
+
+                if message and message.get("type") == "message":
+                    payload = message.get("data")
+                    if isinstance(payload, bytes):
+                        payload = payload.decode()
+                    stream_id = payload
+                    if stream_id:
+                        async with self._roi_cache_lock:
+                            self._roi_cache.pop(stream_id, None)
+                        logger.debug("roi_cache_invalidated", stream_id=stream_id)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("roi_update_listener_error", error=str(e))
+                await asyncio.sleep(1)
+
+    async def _load_rois(self, stream_id: str) -> list[CachedROI]:
+        """从数据库加载 ROI 配置"""
+        async with async_session_maker() as session:
+            result = await session.execute(
+                select(ROI).where(ROI.stream_id == stream_id).order_by(ROI.created_at)
+            )
+            rois = result.scalars().all()
+
+        cached_rois: list[CachedROI] = []
+        for roi in rois:
+            points = [Point(**p) for p in roi.points]
+            thresholds = DensityThresholds(**roi.density_thresholds)
+            area = ROICalculator.polygon_area(points)
+            cached_rois.append(
+                CachedROI(
+                    roi_id=roi.id,
+                    name=roi.name,
+                    points=points,
+                    thresholds=thresholds,
+                    area=area,
+                )
+            )
+
+        return cached_rois
+
+    async def _get_cached_rois(self, stream_id: str) -> list[CachedROI]:
+        """获取缓存的 ROI 列表（带 TTL）"""
+        now = time.time()
+        if self._roi_cache_lock is None:
+            self._roi_cache_lock = asyncio.Lock()
+
+        async with self._roi_cache_lock:
+            cache_entry = self._roi_cache.get(stream_id)
+            if cache_entry and now - cache_entry.fetched_at < self.ROI_CACHE_TTL:
+                return cache_entry.rois
+
+        try:
+            rois = await self._load_rois(stream_id)
+        except Exception as e:
+            logger.warning("load_rois_failed", stream_id=stream_id, error=str(e))
+            rois = []
+
+        async with self._roi_cache_lock:
+            self._roi_cache[stream_id] = ROICacheEntry(rois=rois, fetched_at=now)
+
+        return rois
+
+    async def _calculate_region_stats(
+        self,
+        stream_id: str,
+        detections: list[Detection],
+    ) -> list[RegionStat]:
+        """计算 ROI 区域统计"""
+        rois = await self._get_cached_rois(stream_id)
+        if not rois:
+            return []
+
+        stats: list[RegionStat] = []
+        for roi in rois:
+            stat = ROICalculator.calculate_region_stat(
+                region_id=roi.roi_id,
+                region_name=roi.name,
+                polygon=roi.points,
+                thresholds=roi.thresholds,
+                detections=detections,
+                precomputed_area=roi.area,
+            )
+            stats.append(stat)
+
+        return stats
     
     async def _handle_command(self, data: bytes) -> None:
         """处理控制指令
@@ -347,6 +508,8 @@ class RenderWorker:
             del self._active_streams[stream_id]
             self._failure_counts.pop(stream_id, None)
             self._stream_health.pop(stream_id, None)
+            self._roi_cache.pop(stream_id, None)
+            self._metrics_state.pop(stream_id, None)
             
             # 清理热力图 EMA 状态
             if self._heatmap_generator:
@@ -413,8 +576,11 @@ class RenderWorker:
                     frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((height, width, 3))
                     capture_ts = time.time()
                     
+                    did_infer = False
+
                     # 每 N 帧推理一次（严格对齐模式）
                     if frame_count % config.infer_stride == 0:
+                        did_infer = True
                         # 执行推理
                         detections = await self._run_inference(stream_id, frame)
                         
@@ -449,8 +615,11 @@ class RenderWorker:
                     await asyncio.get_event_loop().run_in_executor(
                         None, writer.stdin.write, processed_frame.tobytes()
                     )
-                    
+
                     frame_count += 1
+
+                    # 上报指标
+                    await self._maybe_report_metrics(stream_id, capture_ts, did_infer)
                     
                 except asyncio.CancelledError:
                     break
@@ -673,7 +842,8 @@ class RenderWorker:
     ) -> None:
         """发布检测结果到 Redis Streams"""
         client = await self._get_redis()
-        
+        region_stats = await self._calculate_region_stats(stream_id, detections)
+
         result = DetectionResult(
             stream_id=stream_id,
             capture_ts=capture_ts,
@@ -683,7 +853,7 @@ class RenderWorker:
             frame_height=frame_height,
             detections=detections,
             heatmap_grid=heatmap_grid,
-            region_stats=[],
+            region_stats=region_stats,
         )
         
         result_json = result.model_dump_json()
@@ -704,6 +874,79 @@ class RenderWorker:
             
         except Exception as e:
             logger.error("publish_result_failed", stream_id=stream_id, error=str(e))
+
+    async def _maybe_report_metrics(
+        self,
+        stream_id: str,
+        capture_ts: float,
+        did_infer: bool,
+    ) -> None:
+        """统计并按间隔上报渲染指标"""
+        now = time.time()
+        state = self._metrics_state.get(stream_id)
+        if state is None:
+            state = RenderMetricsState(last_report_ts=now)
+            self._metrics_state[stream_id] = state
+
+        state.frame_count += 1
+        if did_infer:
+            state.infer_count += 1
+        state.last_frame_ts = capture_ts
+        state.last_latency_ms = max(0.0, (now - capture_ts) * 1000.0)
+
+        interval = max(0.5, settings.metrics_push_interval_sec)
+        if now - state.last_report_ts < interval:
+            return
+
+        elapsed = max(now - state.last_report_ts, 0.001)
+        render_fps_actual = state.frame_count / elapsed
+        infer_fps_actual = state.infer_count / elapsed
+
+        health = self._stream_health.get(stream_id, RenderHealth.HEALTHY)
+        if health == RenderHealth.COOLDOWN:
+            health_state = "cooldown"
+            status = "cooldown"
+        elif self._failure_counts.get(stream_id, 0) > 0:
+            health_state = "degraded"
+            status = "running"
+        else:
+            health_state = "healthy"
+            status = "running"
+
+        metrics = {
+            "render_fps_actual": round(render_fps_actual, 2),
+            "infer_fps_actual": round(infer_fps_actual, 2),
+            "last_frame_ts": state.last_frame_ts,
+            "latency_ms": round(state.last_latency_ms, 2),
+            "health": health_state,
+            "state": status,
+        }
+
+        state.frame_count = 0
+        state.infer_count = 0
+        state.last_report_ts = now
+
+        await self._report_metrics(stream_id, status, metrics)
+
+    async def _report_metrics(self, stream_id: str, status: str, metrics: dict) -> None:
+        """上报渲染指标到状态 Stream"""
+        client = await self._get_redis()
+        message = {
+            "stream_id": stream_id,
+            "event": "METRICS",
+            "status": status,
+            "metrics": metrics,
+            "timestamp": time.time(),
+        }
+        try:
+            await client.xadd(
+                self.STATUS_STREAM,
+                {"data": json.dumps(message)},
+                maxlen=settings.stream_status_maxlen,
+                approximate=True,
+            )
+        except Exception as e:
+            logger.error("report_metrics_failed", stream_id=stream_id, error=str(e))
     
     async def _report_status(self, stream_id: str, event: str, data: dict) -> None:
         """上报状态到 Redis Streams

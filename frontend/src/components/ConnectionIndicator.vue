@@ -135,7 +135,7 @@ const statusConfig = computed(() => {
 }
 
 .status-label {
-  color: #fff;
+  color: var(--color-text);
   white-space: nowrap;
 }
 </style>

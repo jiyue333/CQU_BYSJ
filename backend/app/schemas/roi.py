@@ -113,3 +113,30 @@ class ROIListResponse(BaseModel):
     """ROI 列表响应 Schema"""
     rois: list[ROIResponse] = Field(..., description="ROI 列表")
     total: int = Field(..., description="总数")
+
+
+class ROITemplateRegion(BaseModel):
+    """ROI 模板区域定义（归一化坐标）"""
+    name: str = Field(..., description="区域名称")
+    points: list[Point] = Field(..., min_length=3, description="归一化多边形顶点")
+
+
+class ROITemplate(BaseModel):
+    """ROI 模板 Schema"""
+    id: str = Field(..., description="模板 ID")
+    name: str = Field(..., description="模板名称")
+    description: str = Field("", description="模板描述")
+    tags: list[str] = Field(default_factory=list, description="场景标签")
+    regions: list[ROITemplateRegion] = Field(..., description="模板区域列表")
+
+
+class ROITemplateListResponse(BaseModel):
+    """ROI 模板列表响应"""
+    templates: list[ROITemplate] = Field(..., description="模板列表")
+    total: int = Field(..., description="总数")
+
+
+class ROIPresetRequest(BaseModel):
+    """ROI 模板应用请求"""
+    template_id: str = Field(..., description="模板 ID")
+    replace_existing: bool = Field(False, description="是否替换现有 ROI")

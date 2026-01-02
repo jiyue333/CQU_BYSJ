@@ -6,25 +6,30 @@ ROI 用于定义监控区域和密度阈值，支持多边形区域定义。
 Requirements: 3.1, 3.2, 3.5
 """
 
+import json
 import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.logging import get_logger, log_error, log_info
+from app.core.logging import get_logger, log_info
 
 logger = get_logger(__name__)
+from app.core.redis import get_redis
 from app.models.roi import ROI
+from app.models.system_config import SystemConfig
 from app.models.video_stream import VideoStream
 from app.schemas.roi import (
     ROICreate,
     ROIListResponse,
     ROIResponse,
+    ROIPresetRequest,
     ROIUpdate,
 )
+from app.services.roi_template_service import get_roi_template_service
 
 router = APIRouter()
 
@@ -41,6 +46,29 @@ async def _get_stream_or_404(db: AsyncSession, stream_id: str) -> VideoStream:
             detail=f"Stream {stream_id} not found"
         )
     return stream
+
+
+async def _get_or_create_config(db: AsyncSession, stream_id: str) -> SystemConfig:
+    """获取或创建流配置"""
+    result = await db.execute(
+        select(SystemConfig).where(SystemConfig.stream_id == stream_id)
+    )
+    config = result.scalar_one_or_none()
+    if not config:
+        config = SystemConfig(stream_id=stream_id)
+        db.add(config)
+        await db.commit()
+        await db.refresh(config)
+    return config
+
+
+async def _publish_roi_update(stream_id: str) -> None:
+    """发布 ROI 更新通知"""
+    client = await get_redis()
+    try:
+        await client.publish("roi:updated", stream_id)
+    except Exception as e:
+        logger.warning("publish_roi_update_failed", error=str(e), stream_id=stream_id)
 
 
 async def _get_roi_or_404(db: AsyncSession, stream_id: str, roi_id: str) -> ROI:
@@ -86,17 +114,25 @@ async def create_roi(
     
     log_info(logger, "Creating ROI", stream_id=stream_id, roi_name=data.name)
     
+    # 密度阈值默认值（如果未显式传入则继承系统默认）
+    use_default_thresholds = "density_thresholds" not in data.model_fields_set
+    if use_default_thresholds:
+        config = await _get_or_create_config(db, stream_id)
+        thresholds = config.default_density_thresholds
+    else:
+        thresholds = {
+            "low": data.density_thresholds.low,
+            "medium": data.density_thresholds.medium,
+            "high": data.density_thresholds.high,
+        }
+
     # 创建 ROI
     roi = ROI(
         id=str(uuid.uuid4()),
         stream_id=stream_id,
         name=data.name,
         points=[{"x": p.x, "y": p.y} for p in data.points],
-        density_thresholds={
-            "low": data.density_thresholds.low,
-            "medium": data.density_thresholds.medium,
-            "high": data.density_thresholds.high,
-        },
+        density_thresholds=thresholds,
     )
     
     db.add(roi)
@@ -104,6 +140,7 @@ async def create_roi(
     await db.refresh(roi)
     
     log_info(logger, "ROI created", stream_id=stream_id, roi_id=roi.id)
+    await _publish_roi_update(stream_id)
     return _roi_to_response(roi)
 
 
@@ -200,6 +237,7 @@ async def update_roi(
     await db.refresh(roi)
     
     log_info(logger, "ROI updated", stream_id=stream_id, roi_id=roi_id)
+    await _publish_roi_update(stream_id)
     return _roi_to_response(roi)
 
 
@@ -228,3 +266,76 @@ async def delete_roi(
     await db.commit()
     
     log_info(logger, "ROI deleted", stream_id=stream_id, roi_id=roi_id)
+    await _publish_roi_update(stream_id)
+
+
+@router.post(
+    "/{stream_id}/rois/preset",
+    response_model=ROIListResponse,
+    summary="应用 ROI 模板",
+    description="按模板批量创建 ROI"
+)
+async def apply_roi_preset(
+    stream_id: str,
+    data: ROIPresetRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ROIListResponse:
+    """应用 ROI 模板到指定流"""
+    await _get_stream_or_404(db, stream_id)
+    template_service = get_roi_template_service()
+    template = template_service.get_template(data.template_id)
+    if not template:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Template {data.template_id} not found"
+        )
+
+    # 根据最新结果获取帧尺寸
+    frame_width, frame_height = 1920, 1080
+    redis_client = await get_redis()
+    latest_key = f"latest_result:{stream_id}"
+    latest_result = await redis_client.get(latest_key)
+    if latest_result:
+        try:
+            if isinstance(latest_result, bytes):
+                latest_result = latest_result.decode()
+            latest_data = json.loads(latest_result)
+            frame_width = int(latest_data.get("frame_width") or frame_width)
+            frame_height = int(latest_data.get("frame_height") or frame_height)
+        except Exception:
+            logger.warning("parse_latest_result_failed", stream_id=stream_id)
+
+    if data.replace_existing:
+        await db.execute(delete(ROI).where(ROI.stream_id == stream_id))
+
+    config = await _get_or_create_config(db, stream_id)
+
+    for region in template.regions:
+        points = [
+            {"x": p.x * frame_width, "y": p.y * frame_height}
+            for p in region.points
+        ]
+        roi = ROI(
+            id=str(uuid.uuid4()),
+            stream_id=stream_id,
+            name=region.name,
+            points=points,
+            density_thresholds=config.default_density_thresholds,
+        )
+        db.add(roi)
+
+    await db.commit()
+
+    result = await db.execute(
+        select(ROI)
+        .where(ROI.stream_id == stream_id)
+        .order_by(ROI.created_at)
+    )
+    rois = result.scalars().all()
+
+    await _publish_roi_update(stream_id)
+
+    return ROIListResponse(
+        rois=[_roi_to_response(roi) for roi in rois],
+        total=len(rois),
+    )

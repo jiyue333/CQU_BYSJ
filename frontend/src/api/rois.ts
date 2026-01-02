@@ -3,9 +3,11 @@
  * Requirements: 3.1, 3.2, 3.5
  */
 
-import type { ApiError } from '@/types'
+import type { ROITemplateListResponse } from '@/types'
+import { handleResponse } from './request'
 
 const API_BASE = '/api/streams'
+const TEMPLATE_BASE = '/api/rois'
 
 // ROI 相关类型定义
 export interface Point {
@@ -46,37 +48,7 @@ export interface ROIListResponse {
   total: number
 }
 
-class ApiRequestError extends Error {
-  status: number
-  detail: string
-
-  constructor(status: number, detail: string) {
-    super(detail)
-    this.name = 'ApiRequestError'
-    this.status = status
-    this.detail = detail
-  }
-}
-
-async function handleResponse<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    let detail = `HTTP ${response.status}`
-    try {
-      const error: ApiError = await response.json()
-      detail = error.detail || detail
-    } catch {
-      // ignore JSON parse error
-    }
-    throw new ApiRequestError(response.status, detail)
-  }
-
-  // Handle 204 No Content
-  if (response.status === 204) {
-    return undefined as T
-  }
-
-  return response.json()
-}
+// ApiRequestError and handleResponse moved to ./request
 
 /**
  * 创建 ROI
@@ -132,4 +104,28 @@ export async function deleteROI(streamId: string, roiId: string): Promise<void> 
   return handleResponse<void>(response)
 }
 
-export { ApiRequestError }
+/**
+ * 获取 ROI 模板列表
+ */
+export async function listROITemplates(): Promise<ROITemplateListResponse> {
+  const response = await fetch(`${TEMPLATE_BASE}/templates`)
+  return handleResponse<ROITemplateListResponse>(response)
+}
+
+/**
+ * 应用 ROI 模板
+ */
+export async function applyROIPreset(
+  streamId: string,
+  templateId: string,
+  replaceExisting = false
+): Promise<ROIListResponse> {
+  const response = await fetch(`${API_BASE}/${streamId}/rois/preset`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ template_id: templateId, replace_existing: replaceExisting })
+  })
+  return handleResponse<ROIListResponse>(response)
+}
+
+

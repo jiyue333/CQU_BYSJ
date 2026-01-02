@@ -100,31 +100,31 @@ function getIcon(type: Notification['type']): string {
   gap: 10px;
   padding: 12px 16px;
   border-radius: 8px;
-  background: #2a2a2a;
-  border: 1px solid #333;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  color: #fff;
+  background: var(--color-panel-alt);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 4px 12px var(--color-shadow);
+  color: var(--color-text);
   font-size: 14px;
 }
 
 .notification.error {
   background: rgba(244, 67, 54, 0.15);
-  border-color: #f44336;
+  border-color: var(--color-danger);
 }
 
 .notification.warning {
   background: rgba(255, 152, 0, 0.15);
-  border-color: #ff9800;
+  border-color: var(--color-warning);
 }
 
 .notification.success {
   background: rgba(76, 175, 80, 0.15);
-  border-color: #4caf50;
+  border-color: var(--color-success);
 }
 
 .notification.info {
   background: rgba(33, 150, 243, 0.15);
-  border-color: #2196f3;
+  border-color: var(--color-info);
 }
 
 .notification-icon {
@@ -140,7 +140,7 @@ function getIcon(type: Notification['type']): string {
 .notification-close {
   background: none;
   border: none;
-  color: #888;
+  color: var(--color-text-muted);
   font-size: 18px;
   cursor: pointer;
   padding: 0 4px;
@@ -149,7 +149,7 @@ function getIcon(type: Notification['type']): string {
 }
 
 .notification-close:hover {
-  color: #fff;
+  color: var(--color-text);
 }
 
 /* 动画 */

@@ -3,36 +3,12 @@
  * Requirements: 8.1, 8.2, 8.3, 8.4
  */
 
-import type { SystemConfig, SystemConfigUpdate, ApiError } from '@/types'
+import type { SystemConfig, SystemConfigUpdate, ConfigPresetListResponse } from '@/types'
+import { handleResponse } from './request'
 
 const API_BASE = '/api/config'
 
-class ApiRequestError extends Error {
-  status: number
-  detail: string
-
-  constructor(status: number, detail: string) {
-    super(detail)
-    this.name = 'ApiRequestError'
-    this.status = status
-    this.detail = detail
-  }
-}
-
-async function handleResponse<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    let detail = `HTTP ${response.status}`
-    try {
-      const error: ApiError = await response.json()
-      detail = error.detail || detail
-    } catch {
-      // ignore JSON parse error
-    }
-    throw new ApiRequestError(response.status, detail)
-  }
-
-  return response.json()
-}
+// ApiRequestError and handleResponse moved to ./request
 
 /**
  * 获取流配置
@@ -57,4 +33,12 @@ export async function updateConfig(
   return handleResponse<SystemConfig>(response)
 }
 
-export { ApiRequestError }
+/**
+ * 获取配置预设
+ */
+export async function getConfigPresets(): Promise<ConfigPresetListResponse> {
+  const response = await fetch(`${API_BASE}/presets`)
+  return handleResponse<ConfigPresetListResponse>(response)
+}
+
+
