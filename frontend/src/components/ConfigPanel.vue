@@ -3,7 +3,7 @@
  * 配置管理面板组件
  * 方案 F：服务端渲染热力图配置
  * 提供置信度阈值、热力图网格、推理步长、叠加透明度等配置
- * Requirements: 8.1, 8.2, 8.3
+ * Requirements: 8.1, 8.2, 8.3, P1.1
  */
 
 import { ref, watch, computed, onMounted } from 'vue'
@@ -26,6 +26,7 @@ const saving = ref(false)
 const error = ref<string | null>(null)
 const presets = ref<ConfigPreset[]>([])
 const selectedPresetId = ref<string>('')
+const fileInput = ref<HTMLInputElement | null>(null)
 
 // 表单值（用于编辑）- 方案 F 配置项
 const formValues = ref({
@@ -203,6 +204,57 @@ function applyPreset() {
   formValues.value.render_overlay_alpha = preset.render_overlay_alpha
 }
 
+// Export Config
+function handleExport() {
+  if (!config.value) return
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(config.value, null, 2))
+  const downloadAnchorNode = document.createElement('a')
+  downloadAnchorNode.setAttribute("href", dataStr)
+  downloadAnchorNode.setAttribute("download", `config_${props.streamId}.json`)
+  document.body.appendChild(downloadAnchorNode) // required for firefox
+  downloadAnchorNode.click()
+  downloadAnchorNode.remove()
+}
+
+// Import Config
+function triggerImport() {
+  fileInput.value?.click()
+}
+
+async function handleImport(event: Event) {
+  const target = event.target as HTMLInputElement
+  if (!target.files || target.files.length === 0) return
+
+  const file = target.files[0]
+  if (!file) return
+
+  const reader = new FileReader()
+
+  reader.onload = async (e) => {
+    try {
+      const json = JSON.parse(e.target?.result as string)
+      // Basic validation
+      if (typeof json.confidence_threshold !== 'number') {
+        throw new Error("Invalid config format")
+      }
+
+      // Update form values
+      formValues.value = {
+        ...formValues.value,
+        ...json
+      }
+      // Trigger save automatically? Or just fill form? Let's just fill form.
+
+      // Reset file input
+      if (fileInput.value) fileInput.value.value = ''
+    } catch (err) {
+      emit('error', 'Import failed: Invalid JSON')
+    }
+  }
+
+  reader.readAsText(file)
+}
+
 // 监听 streamId 变化
 watch(() => props.streamId, loadConfig, { immediate: true })
 onMounted(() => {
@@ -214,6 +266,17 @@ onMounted(() => {
   <div class="config-panel">
     <div class="panel-header">
       <h3>⚙️ 配置管理</h3>
+      <div class="header-actions">
+        <button class="btn btn-secondary small" :disabled="!config" @click="handleExport">导出</button>
+        <button class="btn btn-secondary small" :disabled="!config" @click="triggerImport">导入</button>
+        <input
+          ref="fileInput"
+          type="file"
+          accept=".json"
+          style="display: none"
+          @change="handleImport"
+        />
+      </div>
     </div>
 
     <div v-if="!streamId" class="no-stream">
@@ -488,6 +551,9 @@ onMounted(() => {
 
 .panel-header {
   margin-bottom: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .panel-header h3 {
@@ -495,6 +561,11 @@ onMounted(() => {
   font-size: 16px;
   color: var(--color-text);
   font-weight: 600;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .no-stream {

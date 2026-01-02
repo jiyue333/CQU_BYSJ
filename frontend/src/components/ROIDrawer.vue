@@ -2,11 +2,13 @@
 /**
  * ROI 绘制组件
  * Canvas 多边形绘制、编辑与删除功能
- * Requirements: 3.1, 3.2
+ * Requirements: 3.1, 3.2, P0.3
  */
 
 import { ref, watch, onMounted, onUnmounted } from 'vue'
 import type { Point, ROI, ROICreate } from '@/api/rois'
+
+export type DrawMode = 'polygon' | 'rect' | 'circle'
 
 const props = defineProps<{
   width: number
@@ -14,6 +16,7 @@ const props = defineProps<{
   rois: ROI[]
   selectedRoiId: string | null
   editMode: boolean
+  drawMode?: DrawMode
 }>()
 
 const emit = defineEmits<{
@@ -28,7 +31,10 @@ const canvasRef = ref<HTMLCanvasElement | null>(null)
 
 // 绘制状态
 const isDrawing = ref(false)
-const currentPoints = ref<Point[]>([])
+const currentPoints = ref<Point[]>([]) // Used for Polygon
+const drawStartPoint = ref<Point | null>(null) // Used for Rect/Circle
+const drawEndPoint = ref<Point | null>(null) // Used for Rect/Circle
+
 const hoveredRoiId = ref<string | null>(null)
 const dragPointIndex = ref<number | null>(null)
 const isDragging = ref(false)
@@ -186,6 +192,33 @@ function drawLabel(ctx: CanvasRenderingContext2D, roi: ROI) {
   ctx.fillText(roi.name, cx, cy)
 }
 
+// 生成矩形点
+function getRectPoints(p1: Point, p2: Point): Point[] {
+  return [
+    { x: p1.x, y: p1.y },
+    { x: p2.x, y: p1.y },
+    { x: p2.x, y: p2.y },
+    { x: p1.x, y: p2.y }
+  ]
+}
+
+// 生成圆形点（多边形近似）
+function getCirclePoints(center: Point, edge: Point, segments = 32): Point[] {
+  const dx = edge.x - center.x
+  const dy = edge.y - center.y
+  const radius = Math.sqrt(dx * dx + dy * dy)
+
+  const points: Point[] = []
+  for (let i = 0; i < segments; i++) {
+    const angle = (i / segments) * Math.PI * 2
+    points.push({
+      x: center.x + Math.cos(angle) * radius,
+      y: center.y + Math.sin(angle) * radius
+    })
+  }
+  return points
+}
+
 // 渲染所有内容
 function render() {
   const ctx = getContext()
@@ -214,9 +247,21 @@ function render() {
     drawLabel(ctx, roi)
   }
 
-  // 绘制正在绘制的多边形
-  if (isDrawing.value && currentPoints.value.length > 0) {
-    drawPolygon(ctx, currentPoints.value, COLORS.drawing, COLORS.drawingStroke, true)
+  // 绘制正在绘制的图形
+  if (isDrawing.value) {
+    let points: Point[] = []
+
+    if (props.drawMode === 'rect' && drawStartPoint.value && drawEndPoint.value) {
+      points = getRectPoints(drawStartPoint.value, drawEndPoint.value)
+    } else if (props.drawMode === 'circle' && drawStartPoint.value && drawEndPoint.value) {
+      points = getCirclePoints(drawStartPoint.value, drawEndPoint.value)
+    } else if (currentPoints.value.length > 0) {
+      points = currentPoints.value
+    }
+
+    if (points.length > 0) {
+      drawPolygon(ctx, points, COLORS.drawing, COLORS.drawingStroke, true)
+    }
   }
 }
 
@@ -228,23 +273,38 @@ function handleMouseDown(e: MouseEvent) {
 
   // 如果正在绘制新的 ROI
   if (isDrawing.value) {
-    // 检查是否点击了第一个点（闭合多边形）
-    if (currentPoints.value.length >= 3) {
-      const firstPoint = currentPoints.value[0]
-      if (firstPoint) {
-        const dx = pos.x - firstPoint.x
-        const dy = pos.y - firstPoint.y
-        if (Math.sqrt(dx * dx + dy * dy) <= POINT_HIT_RADIUS) {
-          // 完成绘制
-          finishDrawing()
-          return
+    if (props.drawMode === 'polygon' || !props.drawMode) {
+        // 检查是否点击了第一个点（闭合多边形）
+        if (currentPoints.value.length >= 3) {
+        const firstPoint = currentPoints.value[0]
+        if (firstPoint) {
+            const dx = pos.x - firstPoint.x
+            const dy = pos.y - firstPoint.y
+            if (Math.sqrt(dx * dx + dy * dy) <= POINT_HIT_RADIUS) {
+            // 完成绘制
+            finishDrawing()
+            return
+            }
         }
-      }
+        }
+        // 添加新点
+        currentPoints.value.push(pos)
+        render()
+    } else {
+        // Rect/Circle logic: MouseDown starts drawing
+        if (!drawStartPoint.value) {
+            drawStartPoint.value = pos
+            drawEndPoint.value = pos
+        } else {
+             // Second click finishes drawing (if we wanted click-click interaction)
+             // But usually drag is better. Let's support drag for shapes.
+             // Actually, if we are in drawing mode, we probably started by double click or external trigger?
+             // But existing Polygon logic starts with DoubleClick.
+             // Let's adapt:
+             // Polygon: Click to add points.
+             // Rect/Circle: Press to start, Drag to size, Release to finish.
+        }
     }
-
-    // 添加新点
-    currentPoints.value.push(pos)
-    render()
     return
   }
 
@@ -269,6 +329,15 @@ function handleMouseDown(e: MouseEvent) {
     }
   }
 
+  // Rect/Circle 模式下直接开始绘制（按下即开始）
+  if ((props.drawMode === 'rect' || props.drawMode === 'circle') && !isDrawing.value) {
+      isDrawing.value = true
+      drawStartPoint.value = pos
+      drawEndPoint.value = pos
+      emit('select', null)
+      return
+  }
+
   // 点击空白区域，取消选择
   emit('select', null)
 }
@@ -287,6 +356,17 @@ function handleMouseMove(e: MouseEvent) {
       emit('update', props.selectedRoiId, newPoints)
     }
     return
+  }
+
+  // 绘制中更新
+  if (isDrawing.value) {
+      if (props.drawMode === 'rect' || props.drawMode === 'circle') {
+          if (drawStartPoint.value) {
+              drawEndPoint.value = pos
+              render()
+          }
+      }
+      return
   }
 
   // 更新悬停状态
@@ -312,11 +392,17 @@ function handleMouseUp() {
     isDragging.value = false
     dragPointIndex.value = null
   }
+
+  // Finish Rect/Circle drawing on release
+  if (isDrawing.value && (props.drawMode === 'rect' || props.drawMode === 'circle')) {
+      finishDrawing()
+  }
 }
 
-// 处理双击（开始绘制新 ROI）
+// 处理双击（开始绘制新 ROI - Polygon 模式）
 function handleDoubleClick(e: MouseEvent) {
   if (!props.editMode || isDrawing.value) return
+  if (props.drawMode && props.drawMode !== 'polygon') return // Rect/Circle use drag
 
   const pos = getMousePos(e)
 
@@ -349,17 +435,27 @@ function handleKeyDown(e: KeyboardEvent) {
   }
 
   // Enter 完成绘制
-  if (e.key === 'Enter' && isDrawing.value && currentPoints.value.length >= 3) {
-    finishDrawing()
+  if (e.key === 'Enter' && isDrawing.value) {
+      finishDrawing()
   }
 }
 
 // 完成绘制
 function finishDrawing() {
-  if (currentPoints.value.length >= 3) {
+  let points: Point[] = []
+
+  if (props.drawMode === 'rect' && drawStartPoint.value && drawEndPoint.value) {
+      points = getRectPoints(drawStartPoint.value, drawEndPoint.value)
+  } else if (props.drawMode === 'circle' && drawStartPoint.value && drawEndPoint.value) {
+      points = getCirclePoints(drawStartPoint.value, drawEndPoint.value)
+  } else {
+      points = [...currentPoints.value]
+  }
+
+  if (points.length >= 3) {
     emit('create', {
       name: `区域 ${props.rois.length + 1}`,
-      points: [...currentPoints.value]
+      points: points
     })
   }
   cancelDrawing()
@@ -369,13 +465,17 @@ function finishDrawing() {
 function cancelDrawing() {
   isDrawing.value = false
   currentPoints.value = []
+  drawStartPoint.value = null
+  drawEndPoint.value = null
   render()
 }
 
 // 监听 props 变化重新渲染
 watch(
-  () => [props.rois, props.selectedRoiId, props.width, props.height],
+  () => [props.rois, props.selectedRoiId, props.width, props.height, props.drawMode],
   () => {
+    // If drawMode changes, cancel current drawing
+    if (isDrawing.value) cancelDrawing()
     render()
   },
   { deep: true }

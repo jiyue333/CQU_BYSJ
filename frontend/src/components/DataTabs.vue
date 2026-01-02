@@ -9,9 +9,11 @@ import StatsPanel from './StatsPanel.vue'
 import AlertsPanel from './AlertsPanel.vue'
 import ROITemplateSelector from './ROITemplateSelector.vue'
 import HistoryChart from './HistoryChart.vue'
+import RealtimeChart from './RealtimeChart.vue'
 import type { AlertEvent, DetectionResult, RegionStat, StatusMetrics } from '@/types'
 import type { ROI, ROICreate, Point } from '@/api/rois'
 import { listROIs, createROI, updateROI, deleteROI } from '@/api/rois'
+import type { DrawMode } from './ROIDrawer.vue'
 
 const props = defineProps<{
   streamId: string | null
@@ -24,6 +26,7 @@ const emit = defineEmits<{
   (e: 'roiModeChange', enabled: boolean): void
   (e: 'roisChange', rois: ROI[]): void
   (e: 'selectedRoiChange', roiId: string | null): void
+  (e: 'drawModeChange', mode: DrawMode): void
 }>()
 
 // Tab 状态
@@ -34,6 +37,7 @@ const activeTab = ref<TabType>('realtime')
 const rois = ref<ROI[]>([])
 const selectedRoiId = ref<string | null>(null)
 const roiEditMode = ref(false)
+const roiDrawMode = ref<DrawMode>('polygon')
 const roiLoading = ref(false)
 const roiError = ref<string | null>(null)
 
@@ -156,6 +160,15 @@ function startEditName(roi: ROI) {
 function toggleEditMode() {
   roiEditMode.value = !roiEditMode.value
   emit('roiModeChange', roiEditMode.value)
+  // Reset draw mode to polygon
+  roiDrawMode.value = 'polygon'
+  emit('drawModeChange', 'polygon')
+}
+
+// 切换绘制模式
+function setDrawMode(mode: DrawMode) {
+  roiDrawMode.value = mode
+  emit('drawModeChange', mode)
 }
 
 function setActiveTab(tab: TabType) {
@@ -189,6 +202,7 @@ defineExpose({
   rois,
   selectedRoiId,
   roiEditMode,
+  roiDrawMode,
   toggleEditMode,
   setActiveTab,
   handleCreateROI,
@@ -236,7 +250,17 @@ defineExpose({
     <div class="tab-content">
       <!-- 实时统计 -->
       <div v-if="activeTab === 'realtime'" class="tab-panel">
-        <StatsPanel :result="result" :metrics="statusMetrics" :stream-id="streamId" />
+        <div class="panel-section">
+          <StatsPanel :result="result" :metrics="statusMetrics" :stream-id="streamId" />
+        </div>
+        <div v-if="streamId" class="panel-section">
+          <h4>实时趋势</h4>
+          <RealtimeChart
+            :stream-id="streamId"
+            :result="result"
+            :rois="rois"
+          />
+        </div>
       </div>
 
       <!-- ROI 管理 -->
@@ -257,7 +281,38 @@ defineExpose({
             >
               {{ roiEditMode ? '✓ 完成编辑' : '✏️ 编辑模式' }}
             </button>
-            <span v-if="roiEditMode" class="hint">双击视频区域开始绘制</span>
+
+            <template v-if="roiEditMode">
+                <div class="separator"></div>
+                <button
+                    class="tool-btn icon-btn"
+                    :class="{ active: roiDrawMode === 'polygon' }"
+                    @click="setDrawMode('polygon')"
+                    title="多边形"
+                >
+                    ⬡
+                </button>
+                <button
+                    class="tool-btn icon-btn"
+                    :class="{ active: roiDrawMode === 'rect' }"
+                    @click="setDrawMode('rect')"
+                    title="矩形"
+                >
+                    ⬜
+                </button>
+                <button
+                    class="tool-btn icon-btn"
+                    :class="{ active: roiDrawMode === 'circle' }"
+                    @click="setDrawMode('circle')"
+                    title="圆形"
+                >
+                    ⭕
+                </button>
+            </template>
+          </div>
+          <div v-if="roiEditMode" class="hint-bar">
+             <span v-if="roiDrawMode === 'polygon'">双击开始绘制多边形，Enter 结束</span>
+             <span v-else>按下鼠标拖拽绘制，松开结束</span>
           </div>
 
           <!-- 加载状态 -->
@@ -269,7 +324,7 @@ defineExpose({
           <!-- ROI 列表 -->
           <div v-if="rois.length === 0 && !roiLoading" class="empty-state small">
             <p>暂无 ROI 区域</p>
-            <p class="hint">开启编辑模式后双击视频开始绘制</p>
+            <p class="hint">开启编辑模式后绘制感兴趣区域</p>
           </div>
 
           <ul v-else class="roi-list">
@@ -328,10 +383,15 @@ defineExpose({
 
           <!-- 快捷键提示 -->
           <div v-if="roiEditMode" class="shortcuts">
-            <div class="shortcut"><kbd>双击</kbd> 开始绘制</div>
-            <div class="shortcut"><kbd>Enter</kbd> 完成绘制</div>
-            <div class="shortcut"><kbd>Esc</kbd> 取消绘制</div>
-            <div class="shortcut"><kbd>Delete</kbd> 删除选中</div>
+             <template v-if="roiDrawMode === 'polygon'">
+                <div class="shortcut"><kbd>双击</kbd> 开始</div>
+                <div class="shortcut"><kbd>Enter</kbd> 完成</div>
+             </template>
+             <template v-else>
+                <div class="shortcut"><kbd>拖拽</kbd> 绘制</div>
+             </template>
+            <div class="shortcut"><kbd>Esc</kbd> 取消</div>
+            <div class="shortcut"><kbd>Delete</kbd> 删除</div>
           </div>
         </template>
       </div>
@@ -360,11 +420,13 @@ defineExpose({
   background: var(--color-panel);
   border-radius: 12px;
   overflow: hidden;
+  height: 100%; /* Fill available height */
 }
 
 .tab-header {
   display: flex;
   border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
 }
 
 .tab-btn {
@@ -391,11 +453,23 @@ defineExpose({
 
 .tab-content {
   flex: 1;
-  overflow: auto;
+  overflow-y: auto; /* Allow scrolling */
+  min-height: 0; /* Enable flex child scrolling */
 }
 
 .tab-panel {
   padding: 16px;
+  height: 100%;
+}
+
+.panel-section {
+  margin-bottom: 20px;
+}
+
+.panel-section h4 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: var(--color-text-muted);
 }
 
 .empty-state {
@@ -405,10 +479,12 @@ defineExpose({
   justify-content: center;
   padding: 32px;
   color: var(--color-text-subtle);
+  height: 100%;
 }
 
 .empty-state.small {
   padding: 16px;
+  height: auto;
 }
 
 .empty-icon {
@@ -431,12 +507,20 @@ defineExpose({
 .roi-toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.separator {
+    width: 1px;
+    height: 24px;
+    background: var(--color-border);
+    margin: 0 4px;
 }
 
 .tool-btn {
-  padding: 8px 16px;
+  padding: 6px 12px;
   background: var(--color-border);
   border: none;
   border-radius: 6px;
@@ -452,11 +536,26 @@ defineExpose({
 
 .tool-btn.active {
   background: var(--color-primary);
+  color: #fff;
 }
 
-.roi-toolbar .hint {
-  font-size: 12px;
-  color: var(--color-text-muted);
+.icon-btn {
+    padding: 6px;
+    width: 32px;
+    height: 32px;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.hint-bar {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    margin-bottom: 12px;
+    padding: 4px 8px;
+    background: var(--color-panel-alt);
+    border-radius: 4px;
 }
 
 .loading {

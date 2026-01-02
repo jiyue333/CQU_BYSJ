@@ -3,10 +3,13 @@
  * 主应用组件
  * 集成视频源选择、播放器、热力图叠加、实时统计面板、配置管理、错误通知
  * ROI 绘制与区域密度显示
- * Requirements: 5.1, 5.2, 5.3, 7.1, 8.1, 8.2, 8.3, 9.2, 9.4, 3.1, 3.2, 3.3
+ * Requirements: 5.1, 5.2, 5.3, 7.1, 8.1, 8.2, 8.3, 9.2, 9.4, 3.1, 3.2, 3.3, P1.4
  */
 
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { Splitpanes, Pane } from 'splitpanes'
+import 'splitpanes/dist/splitpanes.css'
+
 import VideoSourceSelector from './components/VideoSourceSelector.vue'
 import VideoPlayer from './components/VideoPlayer.vue'
 import DataTabs from './components/DataTabs.vue'
@@ -33,12 +36,19 @@ const protocolPreference = ref<'auto' | 'webrtc' | 'flv' | 'hls'>('auto')
 const PROTOCOL_STORAGE_KEY = 'ccs:playback:protocol'
 const DELAY_STORAGE_KEY = 'ccs:playback:delay'
 const THEME_STORAGE_KEY = 'ccs:theme'
+const LAYOUT_PREF_KEY = 'ccs:layout'
+const LAYOUT_V_PREF_KEY = 'ccs:layout:v'
+const SHOW_DETECTIONS_KEY = 'ccs:show_detections'
+
 const MAX_DELAY_SEC = 5
 
 const theme = ref<'dark' | 'light'>('dark')
 
 // 网格模式
 const gridMode = ref(false)
+
+// 叠加显示开关 (P1.4)
+const showDetections = ref(true)
 
 // 流搜索
 const streamSearch = ref('')
@@ -65,6 +75,10 @@ const videoContainerRef = ref<HTMLDivElement | null>(null)
 const videoWidth = ref(800)
 const videoHeight = ref(450)
 
+// 布局状态
+const splitSize = ref(30) // Sidebar width percentage
+const splitVSize = ref(60) // Video height percentage
+
 // 计算属性
 const selectedStream = computed<VideoStream | undefined>(() => {
   if (!selectedStreamId.value) return undefined
@@ -78,6 +92,26 @@ const latestResult = computed<DetectionResult | null>(() => {
 
 // 简化：直接使用最新结果
 const displayResult = computed<DetectionResult | null>(() => latestResult.value)
+
+// 视频帧实际尺寸（从 displayResult 获取，或默认为 1920x1080）
+const frameWidth = computed(() => displayResult.value?.frame_width || 1920)
+const frameHeight = computed(() => displayResult.value?.frame_height || 1080)
+
+// ROI 显示坐标转换：Frame Coordinates -> Canvas Coordinates
+const displayRois = computed<ROI[]>(() => {
+  if (!rois.value.length) return []
+
+  const scaleX = videoWidth.value / frameWidth.value
+  const scaleY = videoHeight.value / frameHeight.value
+
+  return rois.value.map(roi => ({
+    ...roi,
+    points: roi.points.map(p => ({
+      x: p.x * scaleX,
+      y: p.y * scaleY
+    }))
+  }))
+})
 
 const statusMetrics = computed(() => {
   if (!selectedStreamId.value) return null
@@ -119,8 +153,52 @@ function loadPlaybackPrefs() {
         playbackDelaySec.value = Math.min(Math.max(parsed, 0), MAX_DELAY_SEC)
       }
     }
+    // Load showDetections preference
+    const storedShowDetections = localStorage.getItem(SHOW_DETECTIONS_KEY)
+    if (storedShowDetections !== null) {
+      showDetections.value = storedShowDetections === 'true'
+    }
   } catch {
     // Ignore storage errors
+  }
+}
+
+function loadLayoutPrefs() {
+  try {
+    const stored = localStorage.getItem(LAYOUT_PREF_KEY)
+    if (stored) {
+      const val = parseFloat(stored)
+      if (!isNaN(val) && val > 10 && val < 90) {
+        splitSize.value = val
+      }
+    }
+    const storedV = localStorage.getItem(LAYOUT_V_PREF_KEY)
+    if (storedV) {
+      const val = parseFloat(storedV)
+      if (!isNaN(val) && val > 10 && val < 90) {
+        splitVSize.value = val
+      }
+    }
+  } catch {
+    // Ignore
+  }
+}
+
+function handleResize(panes: { min: number; max: number; size: number }[]) {
+  if (panes[0]) {
+    splitSize.value = panes[0].size
+    localStorage.setItem(LAYOUT_PREF_KEY, String(splitSize.value))
+    // Trigger video resize check
+    setTimeout(updateVideoSize, 50)
+  }
+}
+
+function handleVResize(panes: { min: number; max: number; size: number }[]) {
+  if (panes[0]) {
+    splitVSize.value = panes[0].size
+    localStorage.setItem(LAYOUT_V_PREF_KEY, String(splitVSize.value))
+    // Trigger video resize check
+    setTimeout(updateVideoSize, 50)
   }
 }
 
@@ -342,6 +420,14 @@ watch(theme, (value) => {
   }
 })
 
+watch(showDetections, (value) => {
+  try {
+    localStorage.setItem(SHOW_DETECTIONS_KEY, String(value))
+  } catch {
+    // Ignore storage errors
+  }
+})
+
 watch(gridMode, (enabled) => {
   if (enabled) {
     roiEditMode.value = false
@@ -365,6 +451,7 @@ watch(gridMode, (enabled) => {
 onMounted(async () => {
   loadThemePreference()
   loadPlaybackPrefs()
+  loadLayoutPrefs()
   // 获取流列表
   try {
     await store.fetchStreams()
@@ -478,14 +565,30 @@ function handleSelectedRoiChange(roiId: string | null) {
   selectedRoiId.value = roiId
 }
 
+// 辅助：坐标转换 Canvas Coordinates -> Frame Coordinates
+function scalePointsToFrame(points: Point[]): Point[] {
+  const scaleX = frameWidth.value / videoWidth.value
+  const scaleY = frameHeight.value / videoHeight.value
+
+  return points.map(p => ({
+    x: p.x * scaleX,
+    y: p.y * scaleY
+  }))
+}
+
 // ROI 创建（从 ROIDrawer 触发）
+// 接收的 points 是 Canvas 坐标，需转换为 Frame 坐标
 function handleRoiCreate(data: { name: string; points: Point[] }) {
-  dataTabsRef.value?.handleCreateROI(data)
+  dataTabsRef.value?.handleCreateROI({
+    ...data,
+    points: scalePointsToFrame(data.points)
+  })
 }
 
 // ROI 更新（从 ROIDrawer 触发）
+// 接收的 points 是 Canvas 坐标，需转换为 Frame 坐标
 function handleRoiUpdate(roiId: string, points: Point[]) {
-  dataTabsRef.value?.handleUpdateROIPoints(roiId, points)
+  dataTabsRef.value?.handleUpdateROIPoints(roiId, scalePointsToFrame(points))
 }
 
 // ROI 选择（从 ROIDrawer 触发）
@@ -564,266 +667,285 @@ let resizeObserver: typeof window.ResizeObserver.prototype | null = null
       @dismiss="onDismissNotification" 
     />
 
-    <!-- 侧边栏 -->
-    <aside class="sidebar">
-      <!-- 视频源选择器 -->
-      <VideoSourceSelector @created="onStreamCreated" @error="onError" />
+    <Splitpanes class="default-theme" @resize="handleResize">
+      <!-- 侧边栏 -->
+      <Pane :size="splitSize" :min-size="20" class="sidebar-pane">
+        <aside class="sidebar">
+          <!-- 视频源选择器 -->
+          <VideoSourceSelector @created="onStreamCreated" @error="onError" />
 
-      <!-- 流列表 -->
-      <div class="stream-list">
-        <div class="stream-list-header">
-          <h3>📹 视频流管理</h3>
-          <div class="stream-stats">
-            <span class="stat-badge running">{{ runningCount }} 运行</span>
-            <span class="stat-badge total">{{ totalCount }} 总计</span>
-          </div>
-        </div>
-
-        <div class="stream-search">
-          <input
-            ref="searchInputRef"
-            v-model="streamSearch"
-            type="text"
-            placeholder="搜索流 (/)"
-          />
-        </div>
-
-        <!-- WebSocket 连接状态 -->
-        <ConnectionIndicator :state="connectionState" />
-
-        <div v-if="store.loading" class="loading">
-          <span class="spinner"></span>
-          加载中...
-        </div>
-        <div v-else-if="filteredStreams.length === 0" class="empty">
-          <span class="empty-icon">📭</span>
-          <p>{{ streamSearch ? '无匹配结果' : '暂无视频流' }}</p>
-          <p class="hint">{{ streamSearch ? '请调整搜索关键词' : '请在上方添加视频源' }}</p>
-        </div>
-        <ul v-else class="stream-items">
-          <li
-            v-for="stream in filteredStreams"
-            :key="stream.stream_id"
-            :class="{
-              active: stream.stream_id === selectedStreamId,
-              'flash-success': streamFlash[stream.stream_id] === 'success',
-              'flash-error': streamFlash[stream.stream_id] === 'error'
-            }"
-            :style="{ backgroundColor: stream.stream_id === selectedStreamId ? getStatusConfig(stream.status).bgColor : undefined }"
-            @click="selectStream(stream.stream_id)"
-          >
-            <div class="stream-main">
-              <div class="stream-icon">{{ getTypeIcon(stream.type) }}</div>
-              <div class="stream-info">
-                <span class="stream-name">{{ stream.name }}</span>
-                <span class="stream-type">{{ stream.type.toUpperCase() }}</span>
+          <!-- 流列表 -->
+          <div class="stream-list">
+            <div class="stream-list-header">
+              <h3>📹 视频流管理</h3>
+              <div class="stream-stats">
+                <span class="stat-badge running">{{ runningCount }} 运行</span>
+                <span class="stat-badge total">{{ totalCount }} 总计</span>
               </div>
             </div>
-            <div class="stream-actions">
-              <span 
-                class="stream-status-badge"
-                :style="{ 
-                  color: getStatusConfig(stream.status).color,
-                  backgroundColor: getStatusConfig(stream.status).bgColor
+
+            <div class="stream-search">
+              <input
+                ref="searchInputRef"
+                v-model="streamSearch"
+                type="text"
+                placeholder="搜索流 (/)"
+              />
+            </div>
+
+            <!-- WebSocket 连接状态 -->
+            <ConnectionIndicator :state="connectionState" />
+
+            <div v-if="store.loading" class="loading">
+              <span class="spinner"></span>
+              加载中...
+            </div>
+            <div v-else-if="filteredStreams.length === 0" class="empty">
+              <span class="empty-icon">📭</span>
+              <p>{{ streamSearch ? '无匹配结果' : '暂无视频流' }}</p>
+              <p class="hint">{{ streamSearch ? '请调整搜索关键词' : '请在上方添加视频源' }}</p>
+            </div>
+            <ul v-else class="stream-items">
+              <li
+                v-for="stream in filteredStreams"
+                :key="stream.stream_id"
+                :class="{
+                  active: stream.stream_id === selectedStreamId,
+                  'flash-success': streamFlash[stream.stream_id] === 'success',
+                  'flash-error': streamFlash[stream.stream_id] === 'error'
                 }"
+                :style="{ backgroundColor: stream.stream_id === selectedStreamId ? getStatusConfig(stream.status).bgColor : undefined }"
+                @click="selectStream(stream.stream_id)"
               >
-                {{ getStatusConfig(stream.status).icon }} {{ getStatusConfig(stream.status).label }}
-              </span>
-              <div class="action-buttons">
-                <button
-                  v-if="canStart(stream.status)"
-                  class="action-btn start"
-                  title="启动"
-                  @click.stop="handleStart(stream.stream_id)"
-                >
-                  ▶
-                </button>
-                <button
-                  v-if="canStop(stream.status)"
-                  class="action-btn stop"
-                  title="停止"
-                  @click.stop="handleStop(stream.stream_id)"
-                >
-                  ⏹
-                </button>
-                <button
-                  class="action-btn delete"
-                  title="删除"
-                  @click.stop="confirmDelete(stream.stream_id, $event)"
-                >
-                  🗑
-                </button>
+                <div class="stream-main">
+                  <div class="stream-icon">{{ getTypeIcon(stream.type) }}</div>
+                  <div class="stream-info">
+                    <span class="stream-name">{{ stream.name }}</span>
+                    <span class="stream-type">{{ stream.type.toUpperCase() }}</span>
+                  </div>
+                </div>
+                <div class="stream-actions">
+                  <span
+                    class="stream-status-badge"
+                    :style="{
+                      color: getStatusConfig(stream.status).color,
+                      backgroundColor: getStatusConfig(stream.status).bgColor
+                    }"
+                  >
+                    {{ getStatusConfig(stream.status).icon }} {{ getStatusConfig(stream.status).label }}
+                  </span>
+                  <div class="action-buttons">
+                    <button
+                      v-if="canStart(stream.status)"
+                      class="action-btn start"
+                      title="启动"
+                      @click.stop="handleStart(stream.stream_id)"
+                    >
+                      ▶
+                    </button>
+                    <button
+                      v-if="canStop(stream.status)"
+                      class="action-btn stop"
+                      title="停止"
+                      @click.stop="handleStop(stream.stream_id)"
+                    >
+                      ⏹
+                    </button>
+                    <button
+                      class="action-btn delete"
+                      title="删除"
+                      @click.stop="confirmDelete(stream.stream_id, $event)"
+                    >
+                      🗑
+                    </button>
+                  </div>
+                </div>
+              </li>
+            </ul>
+          </div>
+
+          <!-- 配置管理面板 -->
+          <div class="panel-toggle">
+            <span>配置面板</span>
+            <button class="btn btn-secondary" @click="showConfigPanel = !showConfigPanel">
+              {{ showConfigPanel ? '收起' : '展开' }}
+            </button>
+          </div>
+          <ConfigPanel
+            v-if="showConfigPanel"
+            :stream-id="selectedStreamId"
+            @error="onError"
+          />
+        </aside>
+      </Pane>
+
+      <!-- 主内容区 -->
+      <Pane :size="100 - splitSize" class="main-pane">
+        <main class="main-content">
+          <div class="global-actions">
+            <div class="global-status">
+              <ConnectionIndicator :state="connectionState" compact />
+              <div class="status-summary">
+                <span>运行 {{ runningCount }} / {{ totalCount }}</span>
               </div>
             </div>
-          </li>
-        </ul>
-      </div>
-
-      <!-- 配置管理面板 -->
-      <div class="panel-toggle">
-        <span>配置面板</span>
-        <button class="btn btn-secondary" @click="showConfigPanel = !showConfigPanel">
-          {{ showConfigPanel ? '收起' : '展开' }}
-        </button>
-      </div>
-      <ConfigPanel
-        v-if="showConfigPanel"
-        :stream-id="selectedStreamId"
-        @error="onError"
-      />
-    </aside>
-
-    <!-- 主内容区 -->
-    <main class="main-content">
-      <div class="global-actions">
-        <div class="global-status">
-          <ConnectionIndicator :state="connectionState" compact />
-          <div class="status-summary">
-            <span>运行 {{ runningCount }} / {{ totalCount }}</span>
-          </div>
-        </div>
-        <div class="global-controls">
-          <button class="btn btn-secondary" :disabled="refreshingAll" @click="refreshAllStreams">
-            {{ refreshingAll ? '刷新中...' : '刷新所有流' }}
-          </button>
-          <button class="btn btn-secondary" @click="toggleTheme">
-            {{ theme === 'dark' ? '浅色模式' : '深色模式' }}
-          </button>
-          <button class="btn btn-secondary" @click="showShortcutHelp = true">快捷键</button>
-        </div>
-      </div>
-
-      <div v-if="gridMode" class="grid-section">
-        <div class="grid-header">
-          <h3>🧩 多路流网格</h3>
-          <button class="btn btn-secondary" @click="gridMode = false">退出网格</button>
-        </div>
-        <StreamGrid :items="gridItems" :selected-id="selectedStreamId" @select="handleGridSelect" />
-      </div>
-
-      <template v-else>
-        <!-- 视频播放区 -->
-        <div class="video-section">
-          <div v-if="selectedStream" class="video-toolbar">
-            <div class="toolbar-group">
-              <label>协议</label>
-              <select v-model="protocolPreference" class="toolbar-select">
-                <option value="auto">自动</option>
-                <option value="webrtc">WebRTC</option>
-                <option value="flv">HTTP-FLV</option>
-                <option value="hls">HLS</option>
-              </select>
-            </div>
-            <div class="toolbar-group">
-              <label>播放延迟</label>
-              <input v-model.number="playbackDelaySec" type="range" min="0" max="5" step="0.5" />
-              <span>{{ playbackDelaySec }}s</span>
-            </div>
-            <button class="btn btn-secondary" @click="gridMode = true">网格模式</button>
-          </div>
-
-          <div ref="videoContainerRef" class="video-container">
-            <template v-if="selectedStream">
-              <VideoPlayer
-                :play-url="selectedStream.play_url"
-                :webrtc-url="selectedStream.webrtc_url"
-                :stream-id="selectedStream.stream_id"
-                :status="selectedStream.status"
-                :playback-delay-sec="playbackDelaySec"
-                :preferred-protocol="protocolPreference"
-              />
-              <DetectionOverlay
-                v-if="displayResult?.detections?.length && !roiEditMode"
-                :detections="displayResult.detections"
-                :frame-width="displayResult.frame_width"
-                :frame-height="displayResult.frame_height"
-                :width="videoWidth"
-                :height="videoHeight"
-              />
-              <!-- ROI 绘制层（编辑模式） -->
-              <ROIDrawer
-                v-if="roiEditMode"
-                :width="videoWidth"
-                :height="videoHeight"
-                :rois="rois"
-                :selected-roi-id="selectedRoiId"
-                :edit-mode="roiEditMode"
-                @create="handleRoiCreate"
-                @update="handleRoiUpdate"
-                @select="handleRoiSelect"
-                @delete="handleRoiDelete"
-              />
-              <!-- 区域密度显示层（非编辑模式且有 ROI） -->
-              <RegionDensityDisplay
-                v-else-if="rois.length > 0"
-                :region-stats="displayResult?.region_stats || []"
-                :rois="rois"
-                :width="videoWidth"
-                :height="videoHeight"
-              />
-            </template>
-            <div v-else class="no-stream">
-              <span class="no-stream-icon">📺</span>
-              <p>请选择或创建视频流</p>
-            </div>
-          </div>
-
-          <!-- 控制栏 -->
-          <div v-if="selectedStream" class="controls">
-            <div class="control-info">
-              <span class="control-stream-name">{{ selectedStream.name }}</span>
-              <span 
-                class="control-status"
-                :style="{ color: getStatusConfig(selectedStream.status).color }"
-              >
-                {{ getStatusConfig(selectedStream.status).icon }} {{ getStatusConfig(selectedStream.status).label }}
-              </span>
-            </div>
-            <div class="control-buttons">
-              <button
-                v-if="canStart(selectedStream.status)"
-                class="btn btn-start"
-                @click="handleStart()"
-              >
-                ▶ 开始
+            <div class="global-controls">
+              <button class="btn btn-secondary" :disabled="refreshingAll" @click="refreshAllStreams">
+                {{ refreshingAll ? '刷新中...' : '刷新所有流' }}
               </button>
-              <button
-                v-if="canStop(selectedStream.status)"
-                class="btn btn-stop"
-                @click="handleStop()"
-              >
-                ⏹ 停止
+              <button class="btn btn-secondary" @click="toggleTheme">
+                {{ theme === 'dark' ? '浅色模式' : '深色模式' }}
               </button>
-              <button 
-                class="btn btn-delete" 
-                @click="confirmDelete(selectedStream.stream_id)"
-              >
-                🗑 删除
-              </button>
+              <button class="btn btn-secondary" @click="showShortcutHelp = true">快捷键</button>
             </div>
           </div>
-        </div>
 
-        <!-- 数据与配置 Tab 面板 -->
-        <div class="panel-toggle">
-          <span>数据面板</span>
-          <button class="btn btn-secondary" @click="showDataPanel = !showDataPanel">
-            {{ showDataPanel ? '收起' : '展开' }}
-          </button>
-        </div>
-        <DataTabs
-          v-if="showDataPanel"
-          ref="dataTabsRef"
-          :stream-id="selectedStreamId"
-          :result="displayResult"
-          :status-metrics="statusMetrics"
-          :alert-events="alertEvents"
-          @roi-mode-change="handleRoiModeChange"
-          @rois-change="handleRoisChange"
-          @selected-roi-change="handleSelectedRoiChange"
-        />
-      </template>
-    </main>
+          <div v-if="gridMode" class="grid-section">
+            <div class="grid-header">
+              <h3>🧩 多路流网格</h3>
+              <button class="btn btn-secondary" @click="gridMode = false">退出网格</button>
+            </div>
+            <StreamGrid :items="gridItems" :selected-id="selectedStreamId" @select="handleGridSelect" />
+          </div>
+
+          <Splitpanes v-else horizontal @resize="handleVResize">
+            <!-- 视频播放区 -->
+            <Pane :size="splitVSize" :min-size="20">
+              <div class="video-section">
+                <div v-if="selectedStream" class="video-toolbar">
+                  <div class="toolbar-group">
+                    <label>协议</label>
+                    <select v-model="protocolPreference" class="toolbar-select">
+                      <option value="auto">自动</option>
+                      <option value="webrtc">WebRTC</option>
+                      <option value="flv">HTTP-FLV</option>
+                      <option value="hls">HLS</option>
+                    </select>
+                  </div>
+                  <div class="toolbar-group">
+                    <label>播放延迟</label>
+                    <input v-model.number="playbackDelaySec" type="range" min="0" max="5" step="0.5" />
+                    <span>{{ playbackDelaySec }}s</span>
+                  </div>
+                  <!-- 检测框开关 -->
+                  <div class="toolbar-group checkbox-group">
+                    <label>
+                      <input type="checkbox" v-model="showDetections" />
+                      显示检测框
+                    </label>
+                  </div>
+                  <button class="btn btn-secondary" @click="gridMode = true">网格模式</button>
+                </div>
+
+                <div ref="videoContainerRef" class="video-container">
+                  <template v-if="selectedStream">
+                    <VideoPlayer
+                      :play-url="selectedStream.play_url"
+                      :webrtc-url="selectedStream.webrtc_url"
+                      :stream-id="selectedStream.stream_id"
+                      :status="selectedStream.status"
+                      :playback-delay-sec="playbackDelaySec"
+                      :preferred-protocol="protocolPreference"
+                    />
+                    <DetectionOverlay
+                      v-if="showDetections && displayResult?.detections?.length && !roiEditMode"
+                      :detections="displayResult.detections"
+                      :frame-width="displayResult.frame_width"
+                      :frame-height="displayResult.frame_height"
+                      :width="videoWidth"
+                      :height="videoHeight"
+                    />
+                    <!-- ROI 绘制层（编辑模式） -->
+                    <!-- 传入 displayRois (Canvas 坐标) -->
+                    <ROIDrawer
+                      v-if="roiEditMode"
+                      :width="videoWidth"
+                      :height="videoHeight"
+                      :rois="displayRois"
+                      :selected-roi-id="selectedRoiId"
+                      :edit-mode="roiEditMode"
+                      @create="handleRoiCreate"
+                      @update="handleRoiUpdate"
+                      @select="handleRoiSelect"
+                      @delete="handleRoiDelete"
+                    />
+                    <!-- 区域密度显示层（非编辑模式且有 ROI） -->
+                    <!-- 传入 displayRois (Canvas 坐标) -->
+                    <RegionDensityDisplay
+                      v-else-if="rois.length > 0"
+                      :region-stats="displayResult?.region_stats || []"
+                      :rois="displayRois"
+                      :width="videoWidth"
+                      :height="videoHeight"
+                    />
+                  </template>
+                  <div v-else class="no-stream">
+                    <span class="no-stream-icon">📺</span>
+                    <p>请选择或创建视频流</p>
+                  </div>
+                </div>
+
+                <!-- 控制栏 -->
+                <div v-if="selectedStream" class="controls">
+                  <div class="control-info">
+                    <span class="control-stream-name">{{ selectedStream.name }}</span>
+                    <span
+                      class="control-status"
+                      :style="{ color: getStatusConfig(selectedStream.status).color }"
+                    >
+                      {{ getStatusConfig(selectedStream.status).icon }} {{ getStatusConfig(selectedStream.status).label }}
+                    </span>
+                  </div>
+                  <div class="control-buttons">
+                    <button
+                      v-if="canStart(selectedStream.status)"
+                      class="btn btn-start"
+                      @click="handleStart()"
+                    >
+                      ▶ 开始
+                    </button>
+                    <button
+                      v-if="canStop(selectedStream.status)"
+                      class="btn btn-stop"
+                      @click="handleStop()"
+                    >
+                      ⏹ 停止
+                    </button>
+                    <button
+                      class="btn btn-delete"
+                      @click="confirmDelete(selectedStream.stream_id)"
+                    >
+                      🗑 删除
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </Pane>
+
+            <!-- 数据与配置 Tab 面板 -->
+            <Pane :size="100 - splitVSize" class="data-pane">
+              <div class="panel-toggle">
+                <span>数据面板</span>
+                <button class="btn btn-secondary" @click="showDataPanel = !showDataPanel">
+                  {{ showDataPanel ? '收起' : '展开' }}
+                </button>
+              </div>
+              <DataTabs
+                v-if="showDataPanel"
+                ref="dataTabsRef"
+                :stream-id="selectedStreamId"
+                :result="displayResult"
+                :status-metrics="statusMetrics"
+                :alert-events="alertEvents"
+                @roi-mode-change="handleRoiModeChange"
+                @rois-change="handleRoisChange"
+                @selected-roi-change="handleSelectedRoiChange"
+              />
+            </Pane>
+          </Splitpanes>
+        </main>
+      </Pane>
+    </Splitpanes>
 
     <!-- 删除确认对话框 -->
     <div v-if="showDeleteConfirm" class="modal-overlay" @click="cancelDelete">
@@ -863,15 +985,55 @@ let resizeObserver: typeof window.ResizeObserver.prototype | null = null
   color: var(--color-text);
 }
 
-.sidebar {
-  width: 420px;
+/* Splitpanes specific styles */
+:deep(.splitpanes__splitter) {
+  background-color: var(--color-border);
+  position: relative;
+}
+
+:deep(.splitpanes__splitter:before) {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  transition: opacity 0.4s;
+  background-color: var(--color-primary);
+  opacity: 0;
+  z-index: 1;
+}
+
+:deep(.splitpanes__splitter:hover:before) {
+  opacity: 1;
+}
+
+:deep(.splitpanes--vertical > .splitpanes__splitter:before) {
+  left: -2px;
+  right: -2px;
+  height: 100%;
+}
+
+:deep(.splitpanes--horizontal > .splitpanes__splitter:before) {
+  top: -2px;
+  bottom: -2px;
+  width: 100%;
+}
+
+.sidebar-pane {
   background: var(--color-surface);
-  border-right: 1px solid var(--color-border);
-  overflow-y: auto;
+  overflow: auto;
+}
+
+.sidebar {
   display: flex;
   flex-direction: column;
   gap: 16px;
   padding: 16px;
+  height: 100%;
+}
+
+.main-pane {
+  display: flex;
+  flex-direction: column;
 }
 
 /* 流列表样式 */
@@ -1188,6 +1350,7 @@ let resizeObserver: typeof window.ResizeObserver.prototype | null = null
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+  height: 100%;
 }
 
 .video-toolbar {
@@ -1206,6 +1369,13 @@ let resizeObserver: typeof window.ResizeObserver.prototype | null = null
   gap: 8px;
   color: var(--color-text-muted);
   font-size: 12px;
+}
+
+.checkbox-group label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
 }
 
 .toolbar-select {
@@ -1433,5 +1603,13 @@ let resizeObserver: typeof window.ResizeObserver.prototype | null = null
 
 .btn-confirm-delete:hover {
   background: #e53935;
+}
+
+.data-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+  padding-top: 12px;
 }
 </style>
