@@ -140,8 +140,8 @@ input {
   backdrop-filter: blur(12px);
   position: relative;
   overflow: hidden;
-  grid-column: span var(--panel-col-span, 4);
-  grid-row: span var(--panel-row-span, 1);
+  grid-column: var(--panel-col-start, auto) / span var(--panel-col-span, 4);
+  grid-row: var(--panel-row-start, auto) / span var(--panel-row-span, 1);
   min-height: calc(var(--row-size) - 6px);
 }
 
@@ -166,7 +166,8 @@ input {
 }
 
 .panel.resizing {
-  cursor: se-resize;
+  cursor: default;
+  user-select: none;
 }
 
 .panel-header {
@@ -266,26 +267,83 @@ input {
 
 .resize-handle {
   position: absolute;
-  right: 14px;
-  bottom: 12px;
-  width: 18px;
-  height: 18px;
-  border-radius: 6px;
-  border: 1px solid rgba(59, 143, 246, 0.35);
-  background: linear-gradient(135deg, rgba(59, 143, 246, 0.2), rgba(255, 255, 255, 0.9));
-  cursor: se-resize;
+  border: none;
+  background: transparent;
+  padding: 0;
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  touch-action: none;
+}
+
+.panel:hover .resize-handle,
+.panel.resizing .resize-handle {
+  opacity: 0.85;
 }
 
 .resize-handle::before {
   content: "";
   position: absolute;
-  right: 4px;
-  bottom: 4px;
-  width: 8px;
-  height: 8px;
-  border-right: 2px solid rgba(59, 143, 246, 0.7);
-  border-bottom: 2px solid rgba(59, 143, 246, 0.7);
-  border-radius: 1px;
+  inset: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(59, 143, 246, 0.35);
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 6px 16px rgba(59, 143, 246, 0.18);
+}
+
+.resize-handle[data-direction="left"],
+.resize-handle[data-direction="right"] {
+  width: 16px;
+  height: 44px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.resize-handle[data-direction="left"] {
+  left: 6px;
+  cursor: ew-resize;
+}
+
+.resize-handle[data-direction="right"] {
+  right: 6px;
+  cursor: ew-resize;
+}
+
+.resize-handle[data-direction="top"],
+.resize-handle[data-direction="bottom"] {
+  width: 44px;
+  height: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.resize-handle[data-direction="top"] {
+  top: 6px;
+  cursor: ns-resize;
+}
+
+.resize-handle[data-direction="bottom"] {
+  bottom: 6px;
+  cursor: ns-resize;
+}
+
+.resize-handle[data-direction="left"]::before,
+.resize-handle[data-direction="right"]::before {
+  inset: auto;
+  width: 4px;
+  height: 26px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.resize-handle[data-direction="top"]::before,
+.resize-handle[data-direction="bottom"]::before {
+  inset: auto;
+  width: 26px;
+  height: 4px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
 }
 
 .drag-handle {

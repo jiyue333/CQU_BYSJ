@@ -1,2 +1,8 @@
 # Detection 服务模块
-# 封装 YOLO solutions 提供的检测、计数、热力图等功能
+
+from .yolo_service import DetectionResult, YOLOService
+
+__all__ = [
+    "YOLOService",
+    "DetectionResult",
+]

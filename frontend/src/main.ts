@@ -343,6 +343,12 @@ if (dashboard) {
   const panels = Array.from(dashboard.querySelectorAll<HTMLElement>(".panel"));
   const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
+  const getPanelSpan = (panel: HTMLElement, name: string, fallback: number) => {
+    const raw = window.getComputedStyle(panel).getPropertyValue(name).trim();
+    const parsed = parseInt(raw, 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
   const getGridMetrics = () => {
     const style = window.getComputedStyle(dashboard);
     const columnGap = parseFloat(style.columnGap) || 0;
@@ -365,20 +371,55 @@ if (dashboard) {
     };
   };
 
+  const getPanelGridStart = (panel: HTMLElement, metrics: ReturnType<typeof getGridMetrics>) => {
+    const panelRect = panel.getBoundingClientRect();
+    const gridRect = dashboard.getBoundingClientRect();
+    const colStep = metrics.columnWidth + metrics.columnGap;
+    const rowStep = metrics.rowSize + metrics.rowGap;
+    const colStart = clamp(Math.round((panelRect.left - gridRect.left) / colStep) + 1, 1, metrics.columnCount);
+    const rowStart = Math.max(1, Math.round((panelRect.top - gridRect.top) / rowStep) + 1);
+
+    return { colStart, rowStart };
+  };
+
   const normalizePanelSpans = () => {
     const { columnCount, rowGap, rowSize } = getGridMetrics();
-    const maxRowSpan = Math.max(1, Math.round(dashboard.clientHeight / (rowSize + rowGap)));
+    const rowStep = rowSize + rowGap;
+    const maxRowSpan = Math.max(1, Math.round((dashboard.scrollHeight + rowSize) / rowStep));
 
     panels.forEach((panel) => {
       const inlineCol = panel.style.getPropertyValue("--panel-col-span");
-      if (inlineCol) {
-        const colSpan = clamp(parseInt(inlineCol, 10) || 1, 1, columnCount);
+      const inlineRow = panel.style.getPropertyValue("--panel-row-span");
+      const inlineColStart = panel.style.getPropertyValue("--panel-col-start");
+      const inlineRowStart = panel.style.getPropertyValue("--panel-row-start");
+
+      if (inlineCol || inlineColStart) {
+        const currentSpan = inlineCol ? parseInt(inlineCol, 10) || 1 : getPanelSpan(panel, "--panel-col-span", 1);
+        let colSpan = clamp(currentSpan, 1, columnCount);
+
+        if (inlineColStart) {
+          const currentStart = parseInt(inlineColStart, 10) || 1;
+          const maxColStart = Math.max(1, columnCount - colSpan + 1);
+          const colStart = clamp(currentStart, 1, maxColStart);
+          panel.style.setProperty("--panel-col-start", `${colStart}`);
+          colSpan = clamp(colSpan, 1, columnCount - colStart + 1);
+        }
+
         panel.style.setProperty("--panel-col-span", `${colSpan}`);
       }
 
-      const inlineRow = panel.style.getPropertyValue("--panel-row-span");
-      if (inlineRow) {
-        const rowSpan = clamp(parseInt(inlineRow, 10) || 1, 1, maxRowSpan);
+      if (inlineRow || inlineRowStart) {
+        const currentSpan = inlineRow ? parseInt(inlineRow, 10) || 1 : getPanelSpan(panel, "--panel-row-span", 1);
+        let rowSpan = clamp(currentSpan, 1, maxRowSpan);
+
+        if (inlineRowStart) {
+          const currentStart = parseInt(inlineRowStart, 10) || 1;
+          const maxRowStart = Math.max(1, maxRowSpan - rowSpan + 1);
+          const rowStart = clamp(currentStart, 1, maxRowStart);
+          panel.style.setProperty("--panel-row-start", `${rowStart}`);
+          rowSpan = clamp(rowSpan, 1, maxRowSpan - rowStart + 1);
+        }
+
         panel.style.setProperty("--panel-row-span", `${rowSpan}`);
       }
     });
@@ -386,7 +427,19 @@ if (dashboard) {
 
   panels.forEach((panel) => {
     const handle = panel.querySelector(".drag-handle");
-    const resizeHandle = panel.querySelector(".resize-handle");
+    panel.querySelectorAll(".resize-handle").forEach((existing) => existing.remove());
+
+    const resizeDirections = ["top", "right", "bottom", "left"];
+    const resizeHandles = resizeDirections.map((direction) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "resize-handle";
+      button.dataset.direction = direction;
+      button.setAttribute("aria-label", "拉伸模块");
+      panel.appendChild(button);
+      return button;
+    });
+
     panel.setAttribute("draggable", "false");
 
     if (handle) {
@@ -406,49 +459,94 @@ if (dashboard) {
       handle.addEventListener("pointercancel", disableDrag);
     }
 
-    if (resizeHandle) {
-      resizeHandle.addEventListener("pointerdown", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        panel.setAttribute("draggable", "false");
-        panel.classList.remove("drag-ready");
-        panel.classList.add("resizing");
+    if (resizeHandles.length > 0) {
+      resizeHandles.forEach((resizeHandle) => {
+        resizeHandle.addEventListener("pointerdown", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          resizeHandle.setPointerCapture(event.pointerId);
+          panel.setAttribute("draggable", "false");
+          panel.classList.remove("drag-ready");
+          panel.classList.add("resizing");
 
-        const startX = event.clientX;
-        const startY = event.clientY;
-        const startRect = panel.getBoundingClientRect();
-        const { columnCount, columnWidth, columnGap, rowGap, rowSize } = getGridMetrics();
-        const maxRowSpan = Math.max(2, Math.round(dashboard.clientHeight / (rowSize + rowGap)));
+          const direction = resizeHandle.dataset.direction || "right";
+          const startX = event.clientX;
+          const startY = event.clientY;
+          const metrics = getGridMetrics();
+          const rowStep = metrics.rowSize + metrics.rowGap;
+          const colStep = metrics.columnWidth + metrics.columnGap;
+          const startColSpan = getPanelSpan(panel, "--panel-col-span", 1);
+          const startRowSpan = getPanelSpan(panel, "--panel-row-span", 1);
+          const { colStart: computedColStart, rowStart: computedRowStart } = getPanelGridStart(panel, metrics);
+          const inlineColStart = panel.style.getPropertyValue("--panel-col-start");
+          const inlineRowStart = panel.style.getPropertyValue("--panel-row-start");
+          const startColStart = inlineColStart ? parseInt(inlineColStart, 10) || computedColStart : computedColStart;
+          const startRowStart = inlineRowStart ? parseInt(inlineRowStart, 10) || computedRowStart : computedRowStart;
 
-        const onMove = (moveEvent: PointerEvent) => {
-          const nextWidth = Math.max(startRect.width + (moveEvent.clientX - startX), columnWidth);
-          const nextHeight = Math.max(startRect.height + (moveEvent.clientY - startY), rowSize);
+          if (direction === "left") {
+            panel.dataset.lockCol = "true";
+          }
+          if (direction === "top") {
+            panel.dataset.lockRow = "true";
+          }
 
-          const colSpan = clamp(
-            Math.round((nextWidth + columnGap) / (columnWidth + columnGap)),
-            1,
-            columnCount
-          );
-          const rowSpan = clamp(
-            Math.round((nextHeight + rowGap) / (rowSize + rowGap)),
-            1,
-            maxRowSpan
-          );
+          const onMove = (moveEvent: PointerEvent) => {
+            let nextColSpan = startColSpan;
+            let nextRowSpan = startRowSpan;
+            let nextColStart = startColStart;
+            let nextRowStart = startRowStart;
+            const deltaCols = Math.round((moveEvent.clientX - startX) / colStep);
+            const deltaRows = Math.round((moveEvent.clientY - startY) / rowStep);
 
-          panel.style.setProperty("--panel-col-span", `${colSpan}`);
-          panel.style.setProperty("--panel-row-span", `${rowSpan}`);
-        };
+            if (direction === "left") {
+              nextColStart = clamp(startColStart + deltaCols, 1, startColStart + startColSpan - 1);
+              nextColSpan = clamp(
+                startColSpan - (nextColStart - startColStart),
+                1,
+                metrics.columnCount - nextColStart + 1
+              );
+            }
 
-        const onUp = () => {
-          panel.classList.remove("resizing");
-          window.removeEventListener("pointermove", onMove);
-          window.removeEventListener("pointerup", onUp);
-          window.removeEventListener("pointercancel", onUp);
-        };
+            if (direction === "right") {
+              nextColSpan = clamp(startColSpan + deltaCols, 1, metrics.columnCount - startColStart + 1);
+            }
 
-        window.addEventListener("pointermove", onMove);
-        window.addEventListener("pointerup", onUp);
-        window.addEventListener("pointercancel", onUp);
+            if (direction === "top") {
+              const maxRowSpan = Math.max(1, Math.round((dashboard.scrollHeight + metrics.rowSize) / rowStep));
+              nextRowStart = clamp(startRowStart + deltaRows, 1, startRowStart + startRowSpan - 1);
+              nextRowSpan = clamp(startRowSpan - (nextRowStart - startRowStart), 1, maxRowSpan);
+            }
+
+            if (direction === "bottom") {
+              const maxRowSpan = Math.max(1, Math.round((dashboard.scrollHeight + metrics.rowSize) / rowStep));
+              nextRowSpan = clamp(startRowSpan + deltaRows, 1, maxRowSpan);
+            }
+
+            panel.style.setProperty("--panel-col-span", `${nextColSpan}`);
+            panel.style.setProperty("--panel-row-span", `${nextRowSpan}`);
+
+            if (panel.dataset.lockCol === "true" || inlineColStart) {
+              panel.style.setProperty("--panel-col-start", `${nextColStart}`);
+            }
+
+            if (panel.dataset.lockRow === "true" || inlineRowStart) {
+              panel.style.setProperty("--panel-row-start", `${nextRowStart}`);
+            }
+          };
+
+          const onUp = () => {
+            panel.classList.remove("resizing");
+            resizeHandle.releasePointerCapture(event.pointerId);
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", onUp);
+            window.removeEventListener("pointercancel", onUp);
+            normalizePanelSpans();
+          };
+
+          window.addEventListener("pointermove", onMove);
+          window.addEventListener("pointerup", onUp);
+          window.addEventListener("pointercancel", onUp);
+        });
       });
     }
 
@@ -456,6 +554,12 @@ if (dashboard) {
       if (!panel.classList.contains("drag-ready")) {
         event.preventDefault();
         return;
+      }
+      if (panel.dataset.lockCol === "true") {
+        panel.style.removeProperty("--panel-col-start");
+      }
+      if (panel.dataset.lockRow === "true") {
+        panel.style.removeProperty("--panel-row-start");
       }
       panel.classList.add("dragging");
       if (event.dataTransfer) {
@@ -468,6 +572,20 @@ if (dashboard) {
       panel.classList.remove("dragging");
       panel.classList.remove("drag-ready");
       panel.setAttribute("draggable", "false");
+
+      if (panel.dataset.lockCol === "true" || panel.dataset.lockRow === "true") {
+        requestAnimationFrame(() => {
+          const metrics = getGridMetrics();
+          const { colStart, rowStart } = getPanelGridStart(panel, metrics);
+          if (panel.dataset.lockCol === "true") {
+            panel.style.setProperty("--panel-col-start", `${colStart}`);
+          }
+          if (panel.dataset.lockRow === "true") {
+            panel.style.setProperty("--panel-row-start", `${rowStart}`);
+          }
+          normalizePanelSpans();
+        });
+      }
     });
   });
 
