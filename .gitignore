@@ -1,0 +1,145 @@
+# ================================
+# 通用忽略规则
+# ================================
+
+# 操作系统
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE 和编辑器
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+.project
+.classpath
+.settings/
+
+# 日志
+*.log
+logs/
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+
+# ================================
+# Python 后端
+# ================================
+
+# 字节码
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 虚拟环境
+.venv/
+venv/
+ENV/
+env/
+.python-version
+
+# 包分发
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# 测试覆盖率
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# MyPy
+.mypy_cache/
+
+# Ruff
+.ruff_cache/
+
+# ================================
+# Node.js 前端
+# ================================
+
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 构建输出
+frontend/dist/
+
+# TypeScript 缓存
+*.tsbuildinfo
+
+# Vite
+.vite/
+
+# ================================
+# 模型和数据
+# ================================
+
+# 模型权重
+models/*.pt
+models/*.pth
+models/*.onnx
+models/*.engine
+!models/.gitkeep
+
+# 数据集
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# 用户上传文件
+uploads/videos/*
+uploads/images/*
+uploads/results/*
+!uploads/videos/.gitkeep
+!uploads/images/.gitkeep
+!uploads/results/.gitkeep
+
+# SQLite 数据库
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+
+# ================================
+# Docker
+# ================================
+
+# Docker 忽略不适用于 git，但某些临时文件
+docker/*.tar
+
+# ================================
+# 其他
+# ================================
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+
+# 备份文件
+*.bak
+*.backup
+
+# 密钥和证书
+*.pem
+*.key
+*.crt
+*.p12
