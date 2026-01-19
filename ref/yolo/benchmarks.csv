@@ -1,2 +1,0 @@
- ,Format,Status❔,Size (MB),metrics/mAP50-95(B),Inference time (ms/im),FPS
-1,ONNX,✅,10.2,0.6082,45.25,22.1
