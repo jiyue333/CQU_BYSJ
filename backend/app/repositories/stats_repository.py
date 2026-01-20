@@ -5,12 +5,36 @@ StatsAggregated 的数据库操作
 """
 
 import json
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.stats_aggregated import StatsAggregated, RegionStatsData
+
+
+def _normalize_time(time_str: str) -> str:
+    """
+    将时间字符串规范化为统一格式（去掉毫秒，确保 Z 结尾）
+
+    前端 toISOString() 输出: 2024-01-20T15:00:00.000Z
+    后端存储: 2024-01-20T15:00:00Z
+    """
+    try:
+        # 移除毫秒部分和时区信息，统一格式
+        if "." in time_str:
+            # 有毫秒: 2024-01-20T15:00:00.000Z
+            time_str = time_str.split(".")[0] + "Z"
+        elif not time_str.endswith("Z"):
+            # 无 Z 结尾
+            if "+" in time_str:
+                time_str = time_str.split("+")[0] + "Z"
+            else:
+                time_str = time_str + "Z"
+        return time_str
+    except Exception:
+        return time_str
 
 
 class StatsRepository:
@@ -84,6 +108,10 @@ class StatsRepository:
             time_to: 结束时间
             region_id: 可选，筛选包含指定区域的记录
         """
+        # 规范化时间格式
+        time_from = _normalize_time(time_from)
+        time_to = _normalize_time(time_to)
+
         stmt = (
             select(StatsAggregated)
             .where(

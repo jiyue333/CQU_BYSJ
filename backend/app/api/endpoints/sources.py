@@ -5,6 +5,7 @@
 """
 
 import uuid
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -15,8 +16,8 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.logger import logger
-from app.models import VideoSource
-from app.repositories import VideoSourceRepository
+from app.models import VideoSource, Region
+from app.repositories import VideoSourceRepository, RegionRepository
 from app.schemas.common import ApiResponse
 from app.schemas.video_source import (
     StreamCreate,
@@ -80,6 +81,20 @@ async def upload_video(
         total_frames=total_frames,
     )
     repo.create(source)
+
+    # 插入默认“全部区域”配置
+    region_repo = RegionRepository(db)
+    points = [[0, 0], [video_width or 0, 0], [video_width or 0, video_height or 0], [0, video_height or 0]]
+    default_region = Region(
+        region_id=str(uuid.uuid4()),
+        source_id=source_id,
+        name="全部区域",
+        points=json.dumps(points),
+        color="#3B8FF6",
+        display_order=0,
+    )
+    region_repo.create(default_region)
+
     logger.info(f"数据源已创建: {source_id}")
 
     return ApiResponse.success(data=VideoSourceResponse.model_validate(source))
@@ -121,6 +136,20 @@ async def add_stream(
         video_fps=video_fps,
     )
     repo.create(source)
+
+    # 插入默认“全部区域”配置
+    region_repo = RegionRepository(db)
+    points = [[0, 0], [video_width or 0, 0], [video_width or 0, video_height or 0], [0, video_height or 0]]
+    default_region = Region(
+        region_id=str(uuid.uuid4()),
+        source_id=source_id,
+        name="全部区域",
+        points=json.dumps(points),
+        color="#3B8FF6",
+        display_order=0,
+    )
+    region_repo.create(default_region)
+
     logger.info(f"流数据源已创建: {source_id}")
 
     return ApiResponse.success(data=VideoSourceResponse.model_validate(source))

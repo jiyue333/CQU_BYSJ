@@ -294,6 +294,11 @@ input {
   border: 1px solid rgba(59, 143, 246, 0.2);
 }
 
+.ghost-button.danger {
+  border-color: rgba(228, 106, 94, 0.35);
+  color: var(--alert);
+}
+
 .primary {
   background: linear-gradient(135deg, var(--accent), var(--accent-soft));
   color: #ffffff;

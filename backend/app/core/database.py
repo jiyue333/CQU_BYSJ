@@ -4,10 +4,13 @@
 SQLite + SQLAlchemy 2.0
 """
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+import traceback
+
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import DeclarativeBase, sessionmaker, Session
 
 from app.core.config import settings
+from app.core.logger import logger
 
 
 class Base(DeclarativeBase):
@@ -22,6 +25,13 @@ engine = create_engine(
     echo=settings.DEBUG,  # 调试模式下打印 SQL
     connect_args={"check_same_thread": False},  # SQLite 需要
 )
+
+
+# 在 DEBUG 下输出每次 ROLLBACK 的调用栈（定位来源）
+if settings.DEBUG:
+    @event.listens_for(Session, "after_rollback")
+    def _log_rollback(session: Session) -> None:
+        logger.warning("DB rollback triggered. Stacktrace:\n%s", "".join(traceback.format_stack()))
 
 # 创建会话工厂
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

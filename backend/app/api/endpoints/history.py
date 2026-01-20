@@ -13,6 +13,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from typing import Optional
 
 from app.core.database import get_db
 from app.core.config import settings
@@ -32,6 +33,7 @@ async def get_history(
     from_time: str = Query(..., alias="from", description="开始时间 (ISO 8601)"),
     to_time: str = Query(..., alias="to", description="结束时间 (ISO 8601)"),
     interval: str = Query(default="1m", description="聚合间隔: 1m / 5m / 1h"),
+    region_id: Optional[str] = Query(default=None, description="区域 ID（可选，筛选指定区域）"),
     db: Session = Depends(get_db),
 ):
     """历史趋势查询"""
@@ -49,6 +51,7 @@ async def get_history(
         interval_type=interval_type,
         time_from=from_time,
         time_to=to_time,
+        region_id=region_id,
     )
 
     series = []

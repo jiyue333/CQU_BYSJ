@@ -8,7 +8,9 @@
 import asyncio
 import base64
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from functools import partial
 from typing import Optional
 
 import cv2
@@ -47,14 +49,17 @@ _analysis_state: dict[str, dict] = {}
 # 异步任务集合
 _tasks: dict[str, asyncio.Task] = {}
 
+# 线程池用于 CPU 密集型推理
+_executor = ThreadPoolExecutor(max_workers=4)
+
 
 def _get_regions_dict(regions: list) -> dict[str, list[tuple]]:
     """将数据库区域转换为 YOLO 服务需要的格式"""
     result = {}
     for region in regions:
-        if region.polygon_points:
+        if region.points:
             try:
-                points = json.loads(region.polygon_points)
+                points = json.loads(region.points) if isinstance(region.points, str) else region.points
                 result[region.name] = [tuple(p) for p in points]
             except json.JSONDecodeError:
                 logger.warning(f"区域 {region.name} 的多边形点解析失败")
@@ -167,9 +172,12 @@ async def _inference_loop(source_id: str) -> None:
         # 6. 推理循环
         frame_count = 0
         last_flush_time = datetime.utcnow()
+        loop = asyncio.get_event_loop()
 
         try:
             for frame in video_service.frames():
+                frame_start_time = asyncio.get_event_loop().time()
+
                 # 检查任务是否被取消
                 if asyncio.current_task().cancelled():
                     break
@@ -178,8 +186,10 @@ async def _inference_loop(source_id: str) -> None:
                 now = datetime.utcnow()
                 timestamp = now.isoformat() + "Z"
 
-                # YOLO 推理
-                result: DetectionResult = yolo_service.process(frame)
+                # YOLO 推理（在线程池中执行，避免阻塞事件循环）
+                result: DetectionResult = await loop.run_in_executor(
+                    _executor, yolo_service.process, frame
+                )
 
                 # 计算 crowd_index
                 crowd_index = _calculate_crowd_index(result.total_count, total_critical)
@@ -277,8 +287,11 @@ async def _inference_loop(source_id: str) -> None:
                 )
                 await ws_manager.send_frame(source_id, realtime_frame)
 
-                # 控制帧率
-                await asyncio.sleep(frame_interval)
+                # 控制帧率（扣除已消耗的时间）
+                elapsed = asyncio.get_event_loop().time() - frame_start_time
+                sleep_time = max(0, frame_interval - elapsed)
+                if sleep_time > 0:
+                    await asyncio.sleep(sleep_time)
 
         except asyncio.CancelledError:
             logger.info(f"推理任务被取消: {source_id}")
@@ -325,12 +338,12 @@ async def start_analysis(
     if not source:
         raise HTTPException(status_code=404, detail="数据源不存在")
 
-    if source.status == "running":
-        raise HTTPException(status_code=400, detail="分析任务已在运行中")
+    # if source.status == "running":
+        # raise HTTPException(status_code=400, detail="分析任务已在运行中")
 
     # 检查是否已有运行中的任务
-    if request.source_id in _tasks and not _tasks[request.source_id].done():
-        raise HTTPException(status_code=400, detail="分析任务已在运行中")
+    # if request.source_id in _tasks and not _tasks[request.source_id].done():
+        # raise HTTPException(status_code=400, detail="分析任务已在运行中")
 
     # 更新数据源状态
     source_repo.update_status(request.source_id, "running")
@@ -365,15 +378,16 @@ async def stop_analysis(
         raise HTTPException(status_code=404, detail="数据源不存在")
 
     # 取消推理任务
-    if request.source_id in _tasks:
-        task = _tasks[request.source_id]
+    task = _tasks.get(request.source_id)
+    if task:
         if not task.done():
             task.cancel()
             try:
                 await task
             except asyncio.CancelledError:
                 pass
-        del _tasks[request.source_id]
+        # 任务可能在 finally 中已删除自己，用 pop 避免 KeyError
+        _tasks.pop(request.source_id, None)
 
     # 更新状态
     source_repo.update_status(request.source_id, "stopped")

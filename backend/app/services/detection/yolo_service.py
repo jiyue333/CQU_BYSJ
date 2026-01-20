@@ -7,10 +7,15 @@ YOLO 检测服务
 - 区域密度计算
 """
 
+import warnings
 from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
+
+# 过滤 Ultralytics "No tracks found" 警告
+warnings.filterwarnings("ignore", message=".*No tracks found.*")
+
 from ultralytics import solutions
 
 from app.utils import calculate_density, calculate_polygon_area
@@ -59,6 +64,7 @@ class YOLOService:
             "device": device,
             "classes": [0],  # 只检测 person
             "show": False,
+            "verbose": False,  # 关闭控制台输出
         }
 
         # 热力图
