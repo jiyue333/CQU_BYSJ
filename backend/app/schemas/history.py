@@ -20,12 +20,26 @@ class HistoryQuery(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class RegionHistoryStats(BaseModel):
+    """区域历史统计"""
+
+    total_count_avg: float = Field(..., description="平均人数")
+    total_count_max: int = Field(..., description="最大人数")
+    total_count_min: int = Field(..., description="最小人数")
+    total_density_avg: float = Field(..., description="平均密度")
+    crowd_index_avg: float = Field(..., description="平均拥挤指数")
+
+
 class HistorySeriesItem(BaseModel):
     """历史趋势数据点"""
 
     time: str = Field(..., description="时间戳")
-    total_count: int = Field(..., description="总人数")
-    total_density: float = Field(..., description="总密度")
+    total_count_avg: float = Field(..., description="平均人数")
+    total_count_max: int = Field(..., description="最大人数")
+    total_count_min: int = Field(..., description="最小人数")
+    total_density_avg: float = Field(..., description="平均密度")
+    crowd_index_avg: Optional[float] = Field(default=None, description="平均拥挤指数")
+    regions: dict[str, RegionHistoryStats] = Field(default_factory=dict, description="各区域统计")
 
 
 class HistoryResponse(BaseModel):

@@ -92,15 +92,6 @@
   ```json
   {
     "source_id": "uuid",
-    "regions": [
-      { "name": "前区", "points": [[0,0], [100,0], [100,100], [0,100]], "color": "#FF5733" }
-    ],
-    "threshold": {
-      "total_warning_threshold": 50,
-      "total_critical_threshold": 100,
-      "default_region_warning": 20,
-      "default_region_critical": 50
-    }
   }
   ```
 - **响应**：
@@ -129,7 +120,6 @@
     "source_id": "uuid",
     "status": "running",
     "start_time": "2025-01-19T10:00:00Z",
-    "progress": 0.5
   }
   ```
 
@@ -153,9 +143,13 @@
     "total_count": 150,
     "total_density": 0.005,
     "regions": [
-      { "name": "前区", "count": 50, "density": 0.008 },
-      { "name": "中区", "count": 60, "density": 0.006 },
-      { "name": "后区", "count": 40, "density": 0.004 }
+      "regionid": {
+        "total_count_avg": 50,
+        "total_count_max": 65,
+        "total_count_min": 40,
+        "total_density_avg": 0.004,
+        "crowd_index_avg": 0.8
+      }    
     ],
     "crowd_index": 0.75,
     "entry_speed": 12
@@ -171,6 +165,7 @@
     "alert_id": "uuid",
     "alert_type": "region_count",
     "level": "critical",
+    "regionId": "xxxx",
     "region_name": "前区",
     "current_value": 65,
     "threshold": 50,
@@ -222,7 +217,7 @@
     "default_region_warning": 20,
     "default_region_critical": 50,
     "region_thresholds": {
-      "前区": { "warning": 20, "critical": 40 }
+      "regionid" : {"name" :"前区", "warning": 20, "critical": 40 }
     },
     "cooldown_seconds": 30
   }
@@ -238,7 +233,7 @@
     "total_warning_threshold": 60,
     "total_critical_threshold": 120,
     "region_thresholds": {
-      "前区": { "warning": 25, "critical": 50 }
+       "regionid" : {"name" :"前区", "warning": 20, "critical": 40 }
     }
   }
   ```
@@ -315,7 +310,7 @@
   - `to`: 结束时间（ISO 8601）
   - `interval`: 聚合间隔（1m / 5m / 1h）
 - **说明**：
-  - `series` 为趋势图数据，按时间桶返回各指标（可选包含 `regions` 区域维度）。
+  - `series` 为趋势图数据，按时间桶返回各指标
 - **响应**：
   ```json
   {
@@ -349,7 +344,7 @@
   { "url": "/downloads/export_20250119.csv" }
   ```
 
-#### POST /api/clip/export
+#### POST /api/clip/export(暂不实现)
 导出视频片段
 
 - **请求**：
@@ -365,7 +360,7 @@
   { "url": "/downloads/clip_20250119.mp4" }
   ```
 
-#### POST /api/frame/snapshot
+#### POST /api/frame/snapshot(暂不实现)
 截图保存
 
 - **请求**：

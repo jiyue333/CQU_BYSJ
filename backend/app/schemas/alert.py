@@ -44,7 +44,7 @@ class AlertThresholdUpdate(BaseModel):
 
 
 class AlertResponse(BaseModel):
-    """告警响应"""
+    """告警响应（完整）"""
 
     alert_id: str = Field(..., description="告警 ID")
     source_id: str = Field(..., description="数据源 ID")
@@ -57,6 +57,31 @@ class AlertResponse(BaseModel):
     triggered_at: str = Field(..., description="触发时间")
 
     model_config = {"from_attributes": True}
+
+
+class AlertRecentItem(BaseModel):
+    """最近告警项（简化版）"""
+
+    alert_id: str = Field(..., description="告警 ID")
+    alert_type: str = Field(..., description="告警类型: total_count/region_count")
+    level: str = Field(..., description="级别: warning/critical")
+    region_name: Optional[str] = Field(default=None, description="区域名称")
+    current_value: int = Field(..., description="当前值")
+    threshold: int = Field(..., description="阈值")
+    timestamp: str = Field(..., description="触发时间")
+    message: Optional[str] = Field(default=None, description="告警信息")
+
+
+class AlertRecentResponse(BaseModel):
+    """最近告警列表响应"""
+
+    items: list[AlertRecentItem] = Field(default_factory=list)
+
+
+class AlertExportResponse(BaseModel):
+    """告警导出响应"""
+
+    url: str = Field(..., description="下载链接")
 
 
 class AlertListResponse(BaseModel):

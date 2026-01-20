@@ -20,7 +20,7 @@ from app.core.logger import logger
 from app.models import ExportTask
 from app.repositories import StatsRepository, VideoSourceRepository, ExportTaskRepository
 from app.schemas.common import ApiResponse
-from app.schemas.history import HistorySeriesItem, HistoryResponse
+from app.schemas.history import HistorySeriesItem, HistoryResponse, RegionHistoryStats
 from app.schemas.export import ExportResponse
 
 router = APIRouter(tags=["历史与导出"])
@@ -51,14 +51,31 @@ async def get_history(
         time_to=to_time,
     )
 
-    series = [
-        HistorySeriesItem(
-            time=s.time_bucket,
-            total_count=int(s.total_count_avg),
-            total_density=s.total_density_avg,
+    series = []
+    for s in stats:
+        # 构建区域统计
+        regions_data = {}
+        region_stats_dict = s.get_region_stats_dict()
+        for region_id, r in region_stats_dict.items():
+            regions_data[region_id] = RegionHistoryStats(
+                total_count_avg=r.avg,
+                total_count_max=r.max,
+                total_count_min=r.min,
+                total_density_avg=0.0,  # 区域密度暂不存储
+                crowd_index_avg=r.crowd_index,
+            )
+
+        series.append(
+            HistorySeriesItem(
+                time=s.time_bucket,
+                total_count_avg=s.total_count_avg,
+                total_count_max=s.total_count_max,
+                total_count_min=s.total_count_min,
+                total_density_avg=s.total_density_avg,
+                crowd_index_avg=s.crowd_index_avg,
+                regions=regions_data,
+            )
         )
-        for s in stats
-    ]
 
     return ApiResponse.success(data=HistoryResponse(series=series))
 

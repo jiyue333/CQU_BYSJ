@@ -26,7 +26,6 @@ from app.schemas.analysis import (
 
 router = APIRouter(prefix="/analysis", tags=["分析控制"])
 
-# 内存中存储分析状态（后续可改为 Redis）
 _analysis_state: dict[str, dict] = {}
 
 
