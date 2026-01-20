@@ -53,8 +53,14 @@ def init_db() -> None:
     settings.ensure_dirs()
 
     # 导入所有模型，确保它们被注册到 Base.metadata
-    # TODO: 添加模型后在这里导入
-    # from app.models import video_source, alert
+    from app.models import (  # noqa: F401
+        VideoSource,
+        Region,
+        AlertConfig,
+        Alert,
+        StatsAggregated,
+        ExportTask,
+    )
 
     # 创建所有表
     Base.metadata.create_all(bind=engine)
