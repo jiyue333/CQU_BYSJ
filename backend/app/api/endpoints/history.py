@@ -108,7 +108,7 @@ async def export_data(
         raise HTTPException(status_code=404, detail="该时间段内无数据")
 
     # 创建导出目录
-    export_dir = settings.BASE_DIR / "downloads"
+    export_dir = Path(settings.BASE_DIR) / "downloads"
     export_dir.mkdir(parents=True, exist_ok=True)
 
     # 生成文件名

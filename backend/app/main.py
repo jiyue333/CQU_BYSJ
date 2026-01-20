@@ -5,6 +5,7 @@ FastAPI 应用配置和启动
 """
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -53,7 +54,7 @@ def create_app() -> FastAPI:
     app.include_router(api_router, prefix="/api")
 
     # 静态文件服务（下载目录）
-    downloads_dir = settings.BASE_DIR / "downloads"
+    downloads_dir = Path(settings.BASE_DIR) / "downloads"
     downloads_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/downloads", StaticFiles(directory=str(downloads_dir)), name="downloads")
 

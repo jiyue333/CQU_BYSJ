@@ -6,6 +6,7 @@
 
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 import cv2
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
@@ -41,7 +42,7 @@ async def upload_video(
     # 保存文件
     source_id = str(uuid.uuid4())
     settings.ensure_dirs()
-    file_path = settings.UPLOAD_DIR / f"{source_id}{file_ext}"
+    file_path = Path(settings.UPLOAD_DIR) / f"{source_id}{file_ext}"
 
     try:
         content = await file.read()

@@ -1,41 +1,47 @@
 # Docker Compose 配置
-# 基于YOLO的实时人流计数与密度分析系统
+# CrowdFlow - 人流密度分析系统
 
-version: '3.8'
+version: "3.8"
 
 services:
-  # 前端服务
-  frontend:
-    build:
-      context: .
-      dockerfile: docker/frontend.Dockerfile
-    ports:
-      - "3000:80"
-    depends_on:
-      - backend
-    networks:
-      - crowd-flow-network
-
   # 后端服务
   backend:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./models:/app/models
-      - ./data:/app/data
-      - ./uploads:/app/uploads
-      - ./logs:/app/logs
+    container_name: crowdflow-backend
+    restart: unless-stopped
+    env_file:
+      - .env
     environment:
-      - DATABASE_URL=sqlite:///data/crowdflow.db
+      - DATA_DIR=/data
+      - UPLOAD_DIR=/uploads/videos
+      - MODEL_DIR=/models
+      - LOGS_DIR=/logs
+    volumes:
+      - ./data:/data
+      - ./uploads:/uploads
+      - ./models:/models
+      - ./logs:/logs
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
     networks:
-      - crowd-flow-network
+      - crowdflow-network
+
+  # 前端服务
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    container_name: crowdflow-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      - backend
+    networks:
+      - crowdflow-network
 
 networks:
-  crowd-flow-network:
+  crowdflow-network:
     driver: bridge
-
-volumes:
-  redis_data:

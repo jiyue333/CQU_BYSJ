@@ -44,8 +44,8 @@ def setup_logger(name: str = "crowdflow") -> logging.Logger:
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-    # 文件 handler - 输出到根目录 logs/ 文件夹
-    logs_dir = settings.BASE_DIR / "logs"
+    # 文件 handler - 输出到 logs/ 文件夹
+    logs_dir = Path(settings.LOGS_DIR)
     logs_dir.mkdir(parents=True, exist_ok=True)
 
     file_handler = RotatingFileHandler(

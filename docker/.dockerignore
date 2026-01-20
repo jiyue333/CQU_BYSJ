@@ -1,1 +1,36 @@
 # Docker 构建忽略文件
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Git
+.git/
+.gitignore
+
+# 环境文件
+.env
+.env.local
+
+# 日志和数据
+logs/
+*.log
+data/
+uploads/
+
+# 系统文件
+.DS_Store
+Thumbs.db

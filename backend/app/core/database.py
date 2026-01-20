@@ -18,7 +18,7 @@ class Base(DeclarativeBase):
 
 # 创建数据库引擎
 engine = create_engine(
-    settings.DATABASE_URL,
+    settings.get_database_url(),
     echo=settings.DEBUG,  # 调试模式下打印 SQL
     connect_args={"check_same_thread": False},  # SQLite 需要
 )

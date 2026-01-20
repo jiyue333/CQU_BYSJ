@@ -32,7 +32,7 @@ class StatsExporter:
 
     def _ensure_export_dir(self) -> Path:
         """确保导出目录存在"""
-        export_dir = settings.BASE_DIR / "downloads"
+        export_dir = Path(settings.BASE_DIR) / "downloads"
         export_dir.mkdir(parents=True, exist_ok=True)
         return export_dir
 
