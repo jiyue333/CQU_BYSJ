@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 class RegionThreshold(BaseModel):
     """单个区域阈值"""
 
+    name: str = Field(..., description="区域名称")
     warning: int = Field(..., description="预警阈值")
     critical: int = Field(..., description="严重阈值")
 
@@ -65,6 +66,7 @@ class AlertRecentItem(BaseModel):
     alert_id: str = Field(..., description="告警 ID")
     alert_type: str = Field(..., description="告警类型: total_count/region_count")
     level: str = Field(..., description="级别: warning/critical")
+    region_id: Optional[str] = Field(default=None, description="区域 ID")
     region_name: Optional[str] = Field(default=None, description="区域名称")
     current_value: int = Field(..., description="当前值")
     threshold: int = Field(..., description="阈值")

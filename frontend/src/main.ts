@@ -262,6 +262,8 @@ type AlertItem = {
   level?: string;
   region_name?: string;
   region?: string;
+  region_id?: string;
+  regionId?: string;
   current_value?: number;
   threshold?: number;
   timestamp?: string;
@@ -294,10 +296,6 @@ type HistorySummary = {
   total_count_max?: number;
   total_count_min?: number;
   total_density_avg?: number;
-  region_stats?: Record<
-    string,
-    { name?: string; avg?: number; max?: number; min?: number; crowd_index?: number }
-  > | string | null;
   crowd_index_avg?: number;
 };
 
@@ -385,6 +383,7 @@ const state = {
   historyMetric: "total_count_avg" as HistoryMetricKey,
   historyChart: null as echarts.ECharts | null,
   historyData: null as HistoryResponse | null,
+  historyRegions: [] as RegionItem[],
 };
 
 const setText = (element: HTMLElement | null, value: string) => {
@@ -410,6 +409,24 @@ const formatRate = (value: number | undefined | null) => {
 const formatIndex = (value: number | undefined | null) => {
   if (!Number.isFinite(value)) return "--";
   return value!.toFixed(2);
+};
+
+const toNumberArray = (values: Array<number | undefined>) =>
+  values.filter((value): value is number => Number.isFinite(value));
+
+const average = (values: number[]) => {
+  if (!values.length) return undefined;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+};
+
+const maxValue = (values: number[]) => {
+  if (!values.length) return undefined;
+  return Math.max(...values);
+};
+
+const minValue = (values: number[]) => {
+  if (!values.length) return undefined;
+  return Math.min(...values);
 };
 
 const getMetricMeta = (metricKey: HistoryMetricKey) =>
@@ -620,9 +637,10 @@ const renderAlerts = (items: AlertItem[]) => {
     const time = document.createElement("strong");
     const text = document.createElement("span");
     time.textContent = (item.timestamp || item.time || "--:--").slice(11, 16);
+    const regionLabel =
+      item.region_name || item.region || item.regionId || item.region_id || "区域";
     text.textContent =
-      item.message ||
-      `${item.region_name || item.region || "区域"} ${item.level || ""}`.trim();
+      item.message || `${regionLabel} ${item.level || ""}`.trim();
     row.appendChild(time);
     row.appendChild(text);
     ui.alertList.appendChild(row);
@@ -633,11 +651,49 @@ const updateAlertCount = () => {
   setText(ui.statAlerts, `${state.alertItems.length}`);
 };
 
+const normalizeRealtimeRegions = (regions: unknown): RegionItem[] | null => {
+  if (Array.isArray(regions)) {
+    return regions as RegionItem[];
+  }
+  if (!regions || typeof regions !== "object") return null;
+  const regionMap = new Map<string, string>();
+  state.regionConfigs.forEach((item) => {
+    if (item.region_id) {
+      regionMap.set(item.region_id, item.name || item.region_id);
+    }
+  });
+  return Object.entries(regions as Record<string, Record<string, unknown>>).map(
+    ([regionId, stats]) => {
+      const name =
+        regionMap.get(regionId) ||
+        (typeof stats.name === "string" ? stats.name : undefined) ||
+        regionId;
+      const count =
+        typeof stats.count === "number"
+          ? stats.count
+          : typeof stats.total_count_avg === "number"
+          ? stats.total_count_avg
+          : typeof stats.total_count === "number"
+          ? stats.total_count
+          : undefined;
+      const density =
+        typeof stats.density === "number"
+          ? stats.density
+          : typeof stats.total_density_avg === "number"
+          ? stats.total_density_avg
+          : typeof stats.total_density === "number"
+          ? stats.total_density
+          : undefined;
+      return { name, count, density };
+    }
+  );
+};
+
 const updateRealtime = (payload: {
   frame?: string;
   total_count?: number;
   total_density?: number;
-  regions?: RegionItem[];
+  regions?: unknown;
   crowd_index?: number;
   entry_speed?: number;
 }) => {
@@ -669,8 +725,9 @@ const updateRealtime = (payload: {
   setText(ui.densityLevel, getDensityLevel(density));
   setText(ui.densityValue, Number.isFinite(density) ? `密度 ${formatNumber(density, 3)}` : "--");
 
-  if (Array.isArray(payload.regions)) {
-    updateRegions(payload.regions);
+  const normalizedRegions = normalizeRealtimeRegions(payload.regions);
+  if (normalizedRegions) {
+    updateRegions(normalizedRegions);
   }
 
 };
@@ -783,13 +840,15 @@ const refreshHistoryRegionOptions = async () => {
   ui.historyRegionSelect.appendChild(placeholder);
   if (!state.historySourceId) {
     ui.historyRegionSelect.value = "";
+    state.historyRegions = [];
     return;
   }
   try {
     const data = await apiGet<{ regions?: RegionItem[] }>(
       `/regions?source_id=${encodeURIComponent(state.historySourceId)}`
     );
-    (data.regions || []).forEach((region) => {
+    state.historyRegions = data.regions || [];
+    state.historyRegions.forEach((region) => {
       if (!region.region_id) return;
       const option = document.createElement("option");
       option.value = region.region_id;
@@ -842,39 +901,93 @@ const renderHistoryList = (data: HistoryResponse) => {
   ui.historyList.innerHTML = "";
 
   const summaryRows: Array<{ label: string; value: string }> = [];
-  if (Number.isFinite(data.total_count_avg)) {
-    summaryRows.push({ label: "平均人数", value: formatCount(data.total_count_avg) });
+  const series = data.series || [];
+
+  const totalCountAvg =
+    Number.isFinite(data.total_count_avg) && data.total_count_avg !== undefined
+      ? data.total_count_avg
+      : average(toNumberArray(series.map((item) => item.total_count_avg)));
+  const totalCountMax =
+    Number.isFinite(data.total_count_max) && data.total_count_max !== undefined
+      ? data.total_count_max
+      : maxValue(toNumberArray(series.map((item) => item.total_count_max)));
+  const totalCountMin =
+    Number.isFinite(data.total_count_min) && data.total_count_min !== undefined
+      ? data.total_count_min
+      : minValue(toNumberArray(series.map((item) => item.total_count_min)));
+  const totalDensityAvg =
+    Number.isFinite(data.total_density_avg) && data.total_density_avg !== undefined
+      ? data.total_density_avg
+      : average(toNumberArray(series.map((item) => item.total_density_avg)));
+  const crowdIndexAvg =
+    Number.isFinite(data.crowd_index_avg) && data.crowd_index_avg !== undefined
+      ? data.crowd_index_avg
+      : average(toNumberArray(series.map((item) => item.crowd_index_avg)));
+
+  if (Number.isFinite(totalCountAvg)) {
+    summaryRows.push({ label: "平均人数", value: formatCount(totalCountAvg) });
   }
-  if (Number.isFinite(data.total_count_max)) {
-    summaryRows.push({ label: "最大人数", value: formatCount(data.total_count_max) });
+  if (Number.isFinite(totalCountMax)) {
+    summaryRows.push({ label: "最大人数", value: formatCount(totalCountMax) });
   }
-  if (Number.isFinite(data.total_count_min)) {
-    summaryRows.push({ label: "最小人数", value: formatCount(data.total_count_min) });
+  if (Number.isFinite(totalCountMin)) {
+    summaryRows.push({ label: "最小人数", value: formatCount(totalCountMin) });
   }
-  if (Number.isFinite(data.total_density_avg)) {
-    summaryRows.push({ label: "平均密度", value: formatNumber(data.total_density_avg, 3) });
+  if (Number.isFinite(totalDensityAvg)) {
+    summaryRows.push({ label: "平均密度", value: formatNumber(totalDensityAvg, 3) });
   }
-  if (Number.isFinite(data.crowd_index_avg)) {
-    summaryRows.push({ label: "平均拥挤指数", value: formatNumber(data.crowd_index_avg, 2) });
+  if (Number.isFinite(crowdIndexAvg)) {
+    summaryRows.push({ label: "平均拥挤指数", value: formatNumber(crowdIndexAvg, 2) });
   }
 
-  let regionStats:
-    | Record<string, { name?: string; avg?: number; max?: number; min?: number; crowd_index?: number }>
-    | null = null;
-  if (typeof data.region_stats === "string") {
-    try {
-      regionStats = JSON.parse(data.region_stats);
-    } catch {
-      regionStats = null;
+  const regionAggregates: Record<
+    string,
+    {
+      countSum: number;
+      countCount: number;
+      max?: number;
+      min?: number;
+      crowdSum: number;
+      crowdCount: number;
     }
-  } else if (data.region_stats && typeof data.region_stats === "object") {
-    regionStats = data.region_stats as Record<
-      string,
-      { name?: string; avg?: number; max?: number; min?: number; crowd_index?: number }
-    >;
-  }
+  > = {};
 
-  if (summaryRows.length === 0 && !regionStats) {
+  series.forEach((item) => {
+    if (!item.regions) return;
+    Object.entries(item.regions).forEach(([regionId, stats]) => {
+      if (!regionAggregates[regionId]) {
+        regionAggregates[regionId] = {
+          countSum: 0,
+          countCount: 0,
+          crowdSum: 0,
+          crowdCount: 0,
+        };
+      }
+      const aggregate = regionAggregates[regionId];
+      if (Number.isFinite(stats.total_count_avg)) {
+        aggregate.countSum += stats.total_count_avg!;
+        aggregate.countCount += 1;
+      }
+      if (Number.isFinite(stats.total_count_max)) {
+        aggregate.max =
+          aggregate.max === undefined
+            ? stats.total_count_max
+            : Math.max(aggregate.max, stats.total_count_max!);
+      }
+      if (Number.isFinite(stats.total_count_min)) {
+        aggregate.min =
+          aggregate.min === undefined
+            ? stats.total_count_min
+            : Math.min(aggregate.min, stats.total_count_min!);
+      }
+      if (Number.isFinite(stats.crowd_index_avg)) {
+        aggregate.crowdSum += stats.crowd_index_avg!;
+        aggregate.crowdCount += 1;
+      }
+    });
+  });
+
+  if (summaryRows.length === 0 && Object.keys(regionAggregates).length === 0) {
     const empty = document.createElement("div");
     const time = document.createElement("strong");
     const text = document.createElement("span");
@@ -897,27 +1010,36 @@ const renderHistoryList = (data: HistoryResponse) => {
     ui.historyList.appendChild(row);
   });
 
-  if (regionStats) {
-    Object.entries(regionStats).forEach(([key, stats]) => {
-    if (state.historyRegionId && key !== state.historyRegionId) {
-      if (!state.historyRegionName || key !== state.historyRegionName) return;
+  const regionNameMap = new Map<string, string>();
+  state.historyRegions.forEach((item) => {
+    if (item.region_id) {
+      regionNameMap.set(item.region_id, item.name || item.region_id);
     }
-      const row = document.createElement("div");
-      const label = document.createElement("strong");
-      const text = document.createElement("span");
-      const regionName = typeof stats.name === "string" ? stats.name : key;
-      label.textContent = `${regionName} 区域`;
-      const crowdIndex = Number.isFinite(stats.crowd_index)
-        ? ` / 拥挤指数 ${formatNumber(stats.crowd_index, 2)}`
-        : "";
-      text.textContent = `均值 ${formatCount(stats.avg)} / 峰值 ${formatCount(
-        stats.max
-      )} / 最低 ${formatCount(stats.min)}${crowdIndex}`;
-      row.appendChild(label);
-      row.appendChild(text);
-      ui.historyList.appendChild(row);
-    });
-  }
+  });
+
+  Object.entries(regionAggregates).forEach(([regionId, stats]) => {
+    if (state.historyRegionId && regionId !== state.historyRegionId) {
+      return;
+    }
+    const row = document.createElement("div");
+    const label = document.createElement("strong");
+    const text = document.createElement("span");
+    const regionName =
+      regionNameMap.get(regionId) || state.historyRegionName || regionId;
+    label.textContent = `${regionName} 区域`;
+    const avg = stats.countCount ? stats.countSum / stats.countCount : undefined;
+    const crowdIndex =
+      stats.crowdCount && stats.crowdCount > 0 ? stats.crowdSum / stats.crowdCount : undefined;
+    const crowdText = Number.isFinite(crowdIndex)
+      ? ` / 拥挤指数 ${formatNumber(crowdIndex, 2)}`
+      : "";
+    text.textContent = `均值 ${formatCount(avg)} / 峰值 ${formatCount(
+      stats.max
+    )} / 最低 ${formatCount(stats.min)}${crowdText}`;
+    row.appendChild(label);
+    row.appendChild(text);
+    ui.historyList.appendChild(row);
+  });
 };
 
 const buildHistorySeries = (data: HistoryResponse): HistorySeriesPoint[] => {
@@ -1425,6 +1547,7 @@ if (ui.historySourceSelect) {
       state.historySourceName = "未选择";
       state.historyRegionId = null;
       state.historyRegionName = null;
+      state.historyRegions = [];
       if (ui.historyRegionSelect) {
         ui.historyRegionSelect.value = "";
       }

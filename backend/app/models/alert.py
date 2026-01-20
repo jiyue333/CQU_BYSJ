@@ -36,6 +36,9 @@ class Alert(Base):
     level: Mapped[str] = mapped_column(
         String(20), nullable=False, comment="级别: warning / critical"
     )
+    region_id: Mapped[Optional[str]] = mapped_column(
+        String(36), nullable=True, comment="区域 ID"
+    )
     region_name: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True, comment="区域名称"
     )

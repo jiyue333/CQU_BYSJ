@@ -21,7 +21,6 @@ from app.schemas.analysis import (
     AnalysisStartRequest,
     AnalysisStopRequest,
     AnalysisStatusResponse,
-    ThresholdConfig,
 )
 from app.schemas.alert import (
     AlertThresholdGet,
@@ -41,7 +40,7 @@ from app.schemas.export import (
 from app.schemas.status import SystemStatusResponse
 from app.schemas.websocket import (
     RealtimeFrame,
-    RegionStats,
+    RegionRealtimeStats,
     AlertMessage,
 )
 
@@ -64,7 +63,6 @@ __all__ = [
     "AnalysisStartRequest",
     "AnalysisStopRequest",
     "AnalysisStatusResponse",
-    "ThresholdConfig",
     # Alert
     "AlertThresholdGet",
     "AlertThresholdUpdate",
@@ -81,6 +79,6 @@ __all__ = [
     "SystemStatusResponse",
     # WebSocket
     "RealtimeFrame",
-    "RegionStats",
+    "RegionRealtimeStats",
     "AlertMessage",
 ]
