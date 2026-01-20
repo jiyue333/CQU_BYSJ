@@ -13,11 +13,14 @@ import uuid
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Generator
+from typing import Generator, Optional
 
 import cv2
 import numpy as np
+from sqlalchemy.orm import Session
 
+from app.models.video_source import VideoSource
+from app.repositories.video_source_repository import VideoSourceRepository
 from app.utils import ensure_dir, is_stream_url
 
 
@@ -123,18 +126,27 @@ class VideoService:
         self.close()
 
     @classmethod
-    def save_source(cls, source: str, file_data: bytes | None = None) -> SaveResult:
+    def save_source(
+        cls,
+        source: str,
+        file_data: bytes | None = None,
+        db: Optional[Session] = None,
+        name: Optional[str] = None,
+    ) -> SaveResult:
         """
         保存视频源
 
         Args:
             source: 视频源（文件名或流地址）
             file_data: 上传的文件数据（仅文件类型需要）
+            db: 数据库会话（可选，传入则保存到数据库）
+            name: 数据源名称（可选，默认使用文件名或流地址）
 
         Returns:
             SaveResult: 保存结果
         """
         source_id = str(uuid.uuid4())
+        source_name = name or Path(source).stem if not is_stream_url(source) else source
 
         # 判断类型
         if is_stream_url(source):
@@ -145,8 +157,18 @@ class VideoService:
                 original_name=source,
                 file_path=None,
             )
-            # TODO: 保存到数据库
-            # db.save_video_source(result)
+
+            # 保存到数据库
+            if db:
+                video_source = VideoSource(
+                    source_id=source_id,
+                    name=source_name,
+                    source_type="stream",
+                    status="ready",
+                    stream_url=source,
+                )
+                repo = VideoSourceRepository(db)
+                repo.create(video_source)
         else:
             # 文件：保存文件 + 数据库记录
             ensure_dir(cls.UPLOAD_DIR)
@@ -169,7 +191,29 @@ class VideoService:
                 original_name=source,
                 file_path=str(save_path),
             )
-            # TODO: 保存到数据库
-            # db.save_video_source(result)
+
+            # 保存到数据库
+            if db:
+                # 获取视频信息
+                video_info = None
+                try:
+                    with VideoService(str(save_path)) as vs:
+                        video_info = vs.get_info()
+                except Exception:
+                    pass
+
+                video_source = VideoSource(
+                    source_id=source_id,
+                    name=source_name,
+                    source_type="file",
+                    status="ready",
+                    file_path=str(save_path),
+                    video_width=video_info.width if video_info else None,
+                    video_height=video_info.height if video_info else None,
+                    video_fps=video_info.fps if video_info else None,
+                    total_frames=video_info.total_frames if video_info else None,
+                )
+                repo = VideoSourceRepository(db)
+                repo.create(video_source)
 
         return result

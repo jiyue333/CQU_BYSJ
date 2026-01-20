@@ -185,8 +185,31 @@
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
+| GET | `/api/alerts/recent` | 获取最近五次预警 |
+| GET | `/api/alerts/export` | 导出告警记录 |
 | GET | `/api/alerts/threshold` | 获取当前阈值配置 |
 | POST | `/api/alerts/threshold` | 更新阈值配置 |
+
+#### GET /api/alerts/recent?source_id=...
+获取最近五次预警
+
+- **响应**：
+  ```json
+  {
+    "items": [
+      {
+        "alert_id": "uuid",
+        "alert_type": "region_count",
+        "level": "critical",
+        "region_name": "前区",
+        "current_value": 65,
+        "threshold": 50,
+        "timestamp": "2025-01-19T10:00:00Z",
+        "message": "前区人数超过阈值"
+      }
+    ]
+  }
+  ```
 
 #### GET /api/alerts/threshold?source_id=...
 获取当前阈值配置
@@ -222,6 +245,14 @@
 - **响应**：
   ```json
   { "ok": true }
+  ```
+
+#### GET /api/alerts/export?source_id=...&from=...&to=...&format=csv|xlsx
+导出告警记录
+
+- **响应**：
+  ```json
+  { "url": "/downloads/alerts_20250119.csv" }
   ```
 
 ---
@@ -283,12 +314,29 @@
   - `from`: 开始时间（ISO 8601）
   - `to`: 结束时间（ISO 8601）
   - `interval`: 聚合间隔（1m / 5m / 1h）
+- **说明**：
+  - `series` 为趋势图数据，按时间桶返回各指标（可选包含 `regions` 区域维度）。
 - **响应**：
   ```json
   {
     "series": [
-      { "time": "2025-01-19T10:00:00Z", "total_count": 120, "total_density": 0.005 },
-      { "time": "2025-01-19T10:01:00Z", "total_count": 135, "total_density": 0.006 }
+      {
+        "time": "2025-01-19T10:00:00Z",
+        "total_count_avg": 120,
+        "total_count_max": 140,
+        "total_count_min": 98,
+        "total_density_avg": 0.005,
+        "crowd_index_avg": 0.72,
+        "regions": {
+          "regionid": {
+            "total_count_avg": 50,
+            "total_count_max": 65,
+            "total_count_min": 40,
+            "total_density_avg": 0.004,
+            "crowd_index_avg": 0.8
+          }
+        }
+      }
     ]
   }
   ```
@@ -598,7 +646,7 @@ erDiagram
 | total_count_max | INTEGER | NOT NULL | 最大人数 |
 | total_count_min | INTEGER | NOT NULL | 最小人数 |
 | total_density_avg | REAL | NOT NULL | 平均密度 |
-| region_stats | TEXT | NULL | JSON 各区域统计 `{"前区": {"avg": 50, "max": 65, "min": 40}}` |
+| region_stats | TEXT | NULL | JSON 各区域统计 `{"region_id": {"name": "前区", "avg": 50, "max": 65, "min": 40, "crowd_index": "0.8"}}` |
 | crowd_index_avg | REAL | NULL | 平均拥挤指数 |
 | sample_count | INTEGER | NOT NULL | 采样点数量 |
 | created_at | TEXT | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 记录创建时间 |
@@ -665,4 +713,3 @@ erDiagram
 | stats_aggregated | idx_stats_source_interval_time | source_id, interval_type, time_bucket DESC | 历史趋势查询 |
 | export_tasks | idx_export_source_id | source_id | 按数据源查询 |
 | export_tasks | idx_export_status | status | 按状态过滤 |
-

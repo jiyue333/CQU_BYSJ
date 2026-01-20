@@ -27,14 +27,17 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
 
-    # 数据库配置
-    DATABASE_URL: str = "sqlite:///./data/app.db"
-
-    # 文件路径配置
+    # 文件路径配置 - 根目录级别
     BASE_DIR: Path = Path(__file__).resolve().parent.parent.parent.parent
+    DATA_DIR: Path = BASE_DIR / "data"
     UPLOAD_DIR: Path = BASE_DIR / "uploads" / "videos"
     MODEL_DIR: Path = BASE_DIR / "models"
-    DATA_DIR: Path = BASE_DIR / "data"
+    LOGS_DIR: Path = BASE_DIR / "logs"
+
+    # 数据库配置 - 存储在根目录 data/ 下
+    @property
+    def DATABASE_URL(self) -> str:
+        return f"sqlite:///{self.DATA_DIR}/app.db"
 
     # YOLO 模型配置
     YOLO_MODEL_PATH: str = "yolov8n.pt"
@@ -51,9 +54,10 @@ class Settings(BaseSettings):
 
     def ensure_dirs(self) -> None:
         """确保必要的目录存在"""
+        self.DATA_DIR.mkdir(parents=True, exist_ok=True)
         self.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
         self.MODEL_DIR.mkdir(parents=True, exist_ok=True)
-        self.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        self.LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # 全局配置实例

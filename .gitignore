@@ -100,8 +100,7 @@ models/*.engine
 !models/.gitkeep
 
 # 数据集
-data/raw/*
-data/processed/*
+data/
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 

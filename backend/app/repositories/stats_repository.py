@@ -4,12 +4,13 @@
 StatsAggregated 的数据库操作
 """
 
+import json
 from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.stats_aggregated import StatsAggregated
+from app.models.stats_aggregated import StatsAggregated, RegionStatsData
 
 
 class StatsRepository:
@@ -24,6 +25,34 @@ class StatsRepository:
         self.db.commit()
         self.db.refresh(stat)
         return stat
+
+    def create_with_region_stats(
+        self,
+        source_id: str,
+        time_bucket: str,
+        interval_type: str,
+        total_count_avg: float,
+        total_count_max: int,
+        total_count_min: int,
+        total_density_avg: float,
+        region_stats: dict[str, dict],
+        crowd_index_avg: float,
+        sample_count: int,
+    ) -> StatsAggregated:
+        """创建包含区域统计的记录"""
+        stat = StatsAggregated(
+            source_id=source_id,
+            time_bucket=time_bucket,
+            interval_type=interval_type,
+            total_count_avg=total_count_avg,
+            total_count_max=total_count_max,
+            total_count_min=total_count_min,
+            total_density_avg=total_density_avg,
+            region_stats=json.dumps(region_stats, ensure_ascii=False),
+            crowd_index_avg=crowd_index_avg,
+            sample_count=sample_count,
+        )
+        return self.create(stat)
 
     def bulk_create(self, stats: list[StatsAggregated]) -> list[StatsAggregated]:
         """批量创建统计记录"""
@@ -43,8 +72,18 @@ class StatsRepository:
         interval_type: str,
         time_from: str,
         time_to: str,
+        region_id: Optional[str] = None,
     ) -> list[StatsAggregated]:
-        """按时间范围查询统计数据"""
+        """
+        按时间范围查询统计数据
+
+        Args:
+            source_id: 数据源 ID
+            interval_type: 聚合粒度 (1m/5m/1h/1d)
+            time_from: 开始时间
+            time_to: 结束时间
+            region_id: 可选，筛选包含指定区域的记录
+        """
         stmt = (
             select(StatsAggregated)
             .where(
@@ -55,7 +94,49 @@ class StatsRepository:
             )
             .order_by(StatsAggregated.time_bucket)
         )
-        return list(self.db.scalars(stmt).all())
+        results = list(self.db.scalars(stmt).all())
+
+        # 如果指定了区域 ID，过滤包含该区域的记录
+        if region_id:
+            results = [
+                s for s in results
+                if region_id in s.get_region_stats_dict()
+            ]
+
+        return results
+
+    def get_region_stats_by_time_range(
+        self,
+        source_id: str,
+        interval_type: str,
+        time_from: str,
+        time_to: str,
+        region_id: str,
+    ) -> list[dict]:
+        """
+        获取指定区域在时间范围内的统计数据
+
+        Args:
+            region_id: 区域 ID
+
+        Returns:
+            [{"time": "2024-01-01T10:00:00Z", "name": "前区", "avg": 50, "max": 65, "min": 40, "crowd_index": 0.8}, ...]
+        """
+        stats = self.get_by_time_range(source_id, interval_type, time_from, time_to)
+        result = []
+        for stat in stats:
+            region_data = stat.get_region_stats_dict()
+            if region_id in region_data:
+                r = region_data[region_id]
+                result.append({
+                    "time": stat.time_bucket,
+                    "name": r.name,
+                    "avg": r.avg,
+                    "max": r.max,
+                    "min": r.min,
+                    "crowd_index": r.crowd_index,
+                })
+        return result
 
     def get_latest(
         self,

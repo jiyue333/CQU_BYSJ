@@ -1,3 +1,5 @@
+import * as echarts from "echarts";
+
 const app = document.querySelector("#app");
 
 if (app) {
@@ -35,7 +37,6 @@ if (app) {
                 <span class="chip" data-source-meta>1080p · 26fps</span>
                 <span class="chip" data-analysis-status>待机</span>
               </div>
-              <button class="drag-handle" type="button" aria-label="拖拽模块">拖拽</button>
             </div>
           </div>
           <div class="video-frame">
@@ -59,7 +60,6 @@ if (app) {
             <div class="source-selector">
               <button class="primary" type="button" data-action="source-camera">摄像头</button>
               <button type="button" data-action="source-upload">视频上传</button>
-              <button type="button" data-action="source-history">历史回放</button>
             </div>
             <div class="action-set">
               <button class="ghost-button" type="button" data-action="snapshot">截图</button>
@@ -68,7 +68,6 @@ if (app) {
               <button class="ghost-button" type="button" data-action="stop-analysis">停止分析</button>
             </div>
           </div>
-          <button class="resize-handle" type="button" aria-label="拉伸模块"></button>
         </section>
 
         <section class="panel stat-panel" data-animate>
@@ -79,7 +78,6 @@ if (app) {
             </div>
             <div class="panel-actions">
               <span class="badge">最近 10 秒更新</span>
-              <button class="drag-handle" type="button" aria-label="拖拽模块">拖拽</button>
             </div>
           </div>
           <div class="stat-grid">
@@ -115,7 +113,6 @@ if (app) {
               <span class="dot high"></span>高密度
             </div>
           </div>
-          <button class="resize-handle" type="button" aria-label="拉伸模块"></button>
         </section>
 
         <section class="panel region-panel" data-animate>
@@ -127,7 +124,6 @@ if (app) {
             <div class="panel-actions">
               <button class="ghost-button" type="button" data-action="custom-regions">自定义分区</button>
               <button class="ghost-button" type="button" data-action="add-region">新增区域</button>
-              <button class="drag-handle" type="button" aria-label="拖拽模块">拖拽</button>
             </div>
           </div>
           <div class="region-list" data-region-list>
@@ -135,63 +131,6 @@ if (app) {
           <div class="region-note">
             建议：前区人流密度接近预警阈值，建议引导分流。
           </div>
-          <button class="resize-handle" type="button" aria-label="拉伸模块"></button>
-        </section>
-
-        <section class="panel heatmap-panel" data-animate>
-          <div class="panel-header">
-            <div>
-              <p class="panel-kicker">密度热力图</p>
-              <h2>空间分布</h2>
-            </div>
-            <div class="panel-actions">
-              <div class="chip-row">
-                <span class="chip">自动校准</span>
-                <span class="chip">更新 2s</span>
-              </div>
-              <button class="drag-handle" type="button" aria-label="拖拽模块">拖拽</button>
-            </div>
-          </div>
-          <div class="heatmap">
-            <div class="heat-row">
-              <span class="heat-cell hot"></span>
-              <span class="heat-cell warm"></span>
-              <span class="heat-cell warm"></span>
-              <span class="heat-cell cool"></span>
-              <span class="heat-cell cool"></span>
-              <span class="heat-cell cool"></span>
-            </div>
-            <div class="heat-row">
-              <span class="heat-cell hot"></span>
-              <span class="heat-cell hot"></span>
-              <span class="heat-cell warm"></span>
-              <span class="heat-cell cool"></span>
-              <span class="heat-cell cool"></span>
-              <span class="heat-cell cool"></span>
-            </div>
-            <div class="heat-row">
-              <span class="heat-cell warm"></span>
-              <span class="heat-cell warm"></span>
-              <span class="heat-cell warm"></span>
-              <span class="heat-cell cool"></span>
-              <span class="heat-cell cool"></span>
-              <span class="heat-cell cool"></span>
-            </div>
-            <div class="heat-row">
-              <span class="heat-cell warm"></span>
-              <span class="heat-cell warm"></span>
-              <span class="heat-cell cool"></span>
-              <span class="heat-cell cool"></span>
-              <span class="heat-cell cool"></span>
-              <span class="heat-cell cool"></span>
-            </div>
-          </div>
-          <div class="heatmap-legend">
-            <span>低</span>
-            <div class="legend-bar"></div>
-            <span>高</span>
-          </div>
-          <button class="resize-handle" type="button" aria-label="拉伸模块"></button>
         </section>
 
         <section class="panel history-panel" data-animate>
@@ -201,37 +140,25 @@ if (app) {
               <h2>近 30 分钟</h2>
             </div>
             <div class="panel-actions">
-              <button class="ghost-button" type="button" data-action="refresh-history">刷新</button>
-              <button class="ghost-button" type="button" data-action="export-csv">导出 CSV</button>
-              <button class="drag-handle" type="button" aria-label="拖拽模块">拖拽</button>
+              <select class="ghost-select" data-history-source-select>
+                <option value="">选择数据源</option>
+              </select>
+              <select class="ghost-select" data-history-region-select>
+                <option value="">全部区域</option>
+              </select>
+              <select class="ghost-select" data-history-metric-select></select>
+              <select class="ghost-select" data-history-export-format>
+                <option value="csv">CSV</option>
+                <option value="xlsx">XLSX</option>
+              </select>
+              <button class="ghost-button" type="button" data-action="export-history">导出</button>
             </div>
           </div>
           <div class="history-content">
-            <div class="source-manager">
-              <div class="source-header">
-                <span>数据源管理</span>
-                <button class="ghost-button" type="button" data-action="refresh-sources">刷新</button>
-              </div>
-              <div class="source-list" data-source-list></div>
-            </div>
-            <svg viewBox="0 0 420 140" aria-label="历史趋势图" role="img">
-              <polyline
-                fill="none"
-                stroke="var(--accent)"
-                stroke-width="3"
-                points="0,120 40,100 80,90 120,70 160,80 200,50 240,65 280,60 320,40 360,50 420,30"
-              />
-              <polyline
-                fill="none"
-                stroke="var(--accent-soft)"
-                stroke-width="2"
-                points="0,130 40,120 80,105 120,100 160,115 200,80 240,95 280,85 320,78 360,86 420,70"
-              />
-            </svg>
+            <div class="history-chart" data-history-chart></div>
             <div class="history-list" data-history-list>
             </div>
           </div>
-          <button class="resize-handle" type="button" aria-label="拉伸模块"></button>
         </section>
 
         <section class="panel alert-panel" data-animate>
@@ -242,7 +169,7 @@ if (app) {
             </div>
             <div class="panel-actions">
               <span class="badge warn">高风险模式</span>
-              <button class="drag-handle" type="button" aria-label="拖拽模块">拖拽</button>
+              <button class="ghost-button" type="button" data-action="export-alerts">导出告警</button>
             </div>
           </div>
           <div class="alert-body">
@@ -268,7 +195,6 @@ if (app) {
               </div>
             </div>
           </div>
-          <button class="resize-handle" type="button" aria-label="拉伸模块"></button>
         </section>
       </main>
 
@@ -308,6 +234,21 @@ if (thresholdInput && thresholdValue) {
 
 const API_BASE = "/api";
 const WS_BASE = "/api/ws";
+const HISTORY_METRICS = [
+  { key: "total_count_avg", label: "平均人数", unit: "人", digits: 0, color: "#3B8FF6", min: 0 },
+  { key: "total_count_max", label: "最大人数", unit: "人", digits: 0, color: "#5BC0EB", min: 0 },
+  { key: "total_count_min", label: "最小人数", unit: "人", digits: 0, color: "#2F7DE1", min: 0 },
+  { key: "total_density_avg", label: "平均密度", unit: "", digits: 3, color: "#6BB6FF", min: 0 },
+  {
+    key: "crowd_index_avg",
+    label: "平均拥挤指数",
+    unit: "",
+    digits: 2,
+    color: "#E46A5E",
+    min: 0,
+    max: 1,
+  },
+] as const;
 
 type ApiEnvelope<T> = {
   code: number;
@@ -337,6 +278,57 @@ type RegionItem = {
   color?: string;
 };
 
+type SourceItem = {
+  source_id: string;
+  name?: string;
+  source_type?: string;
+  status?: string;
+  created_at?: string;
+};
+
+type HistoryMetric = typeof HISTORY_METRICS[number];
+type HistoryMetricKey = HistoryMetric["key"];
+
+type HistorySummary = {
+  total_count_avg?: number;
+  total_count_max?: number;
+  total_count_min?: number;
+  total_density_avg?: number;
+  region_stats?: Record<
+    string,
+    { name?: string; avg?: number; max?: number; min?: number; crowd_index?: number }
+  > | string | null;
+  crowd_index_avg?: number;
+};
+
+type HistorySeriesPoint = {
+  time: string;
+  value: number;
+};
+
+type HistorySeriesItem = {
+  time: string;
+  total_count_avg?: number;
+  total_count_max?: number;
+  total_count_min?: number;
+  total_density_avg?: number;
+  crowd_index_avg?: number;
+  regions?: Record<
+    string,
+    {
+      total_count_avg?: number;
+      total_count_max?: number;
+      total_count_min?: number;
+      total_density_avg?: number;
+      crowd_index_avg?: number;
+    }
+  >;
+};
+
+type HistoryResponse = HistorySummary & {
+  series?: HistorySeriesItem[];
+};
+
 const ui = {
   systemStatus: document.querySelector<HTMLElement>("[data-system-status]"),
   sourceTitle: document.querySelector<HTMLElement>("[data-source-title]"),
@@ -354,19 +346,21 @@ const ui = {
   regionList: document.querySelector<HTMLElement>("[data-region-list]"),
   alertList: document.querySelector<HTMLElement>("[data-alert-list]"),
   historyList: document.querySelector<HTMLElement>("[data-history-list]"),
-  sourceList: document.querySelector<HTMLElement>("[data-source-list]"),
+  historyChart: document.querySelector<HTMLElement>("[data-history-chart]"),
+  historySourceSelect: document.querySelector<HTMLSelectElement>("[data-history-source-select]"),
+  historyRegionSelect: document.querySelector<HTMLSelectElement>("[data-history-region-select]"),
+  historyMetricSelect: document.querySelector<HTMLSelectElement>("[data-history-metric-select]"),
+  historyExportFormat: document.querySelector<HTMLSelectElement>("[data-history-export-format]"),
   videoFrame: document.querySelector<HTMLImageElement>("[data-video-frame]"),
   thresholdInput,
   thresholdValue,
   actionButtons: {
     sourceCamera: document.querySelector<HTMLElement>("[data-action='source-camera']"),
     sourceUpload: document.querySelector<HTMLElement>("[data-action='source-upload']"),
-    sourceHistory: document.querySelector<HTMLElement>("[data-action='source-history']"),
     startAnalysis: document.querySelector<HTMLElement>("[data-action='start-analysis']"),
     stopAnalysis: document.querySelector<HTMLElement>("[data-action='stop-analysis']"),
-    refreshHistory: document.querySelector<HTMLElement>("[data-action='refresh-history']"),
-    refreshSources: document.querySelector<HTMLElement>("[data-action='refresh-sources']"),
-    exportCsv: document.querySelector<HTMLElement>("[data-action='export-csv']"),
+    exportHistory: document.querySelector<HTMLElement>("[data-action='export-history']"),
+    exportAlerts: document.querySelector<HTMLElement>("[data-action='export-alerts']"),
     exportClip: document.querySelector<HTMLElement>("[data-action='export-clip']"),
     snapshot: document.querySelector<HTMLElement>("[data-action='snapshot']"),
     customRegions: document.querySelector<HTMLElement>("[data-action='custom-regions']"),
@@ -384,6 +378,13 @@ const state = {
   thresholdConfig: null as Record<string, unknown> | null,
   regionConfigs: [] as RegionItem[],
   analysisStatusTimer: null as number | null,
+  historySourceId: null as string | null,
+  historySourceName: "未选择",
+  historyRegionId: null as string | null,
+  historyRegionName: null as string | null,
+  historyMetric: "total_count_avg" as HistoryMetricKey,
+  historyChart: null as echarts.ECharts | null,
+  historyData: null as HistoryResponse | null,
 };
 
 const setText = (element: HTMLElement | null, value: string) => {
@@ -411,6 +412,23 @@ const formatIndex = (value: number | undefined | null) => {
   return value!.toFixed(2);
 };
 
+const getMetricMeta = (metricKey: HistoryMetricKey) =>
+  HISTORY_METRICS.find((item) => item.key === metricKey) || HISTORY_METRICS[0];
+
+const formatMetricValue = (metricKey: HistoryMetricKey, value: number | undefined | null) => {
+  if (!Number.isFinite(value)) return "--";
+  const meta = getMetricMeta(metricKey);
+  return value!.toFixed(meta.digits);
+};
+
+const formatHistoryTime = (value: string) => {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  const hours = String(parsed.getHours()).padStart(2, "0");
+  const minutes = String(parsed.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+};
+
 const getDensityLevel = (value: number | undefined | null) => {
   if (!Number.isFinite(value)) return "--";
   if (value! >= 0.008) return "拥挤";
@@ -429,6 +447,18 @@ const updateSystemStatus = (status: "online" | "offline" | "connecting") => {
   if (!ui.systemStatus) return;
   ui.systemStatus.classList.toggle("status-online", status === "online");
   setText(ui.systemStatus, status === "online" ? "在线" : status === "connecting" ? "连接中" : "离线");
+};
+
+const setAnalysisStatus = (status: string, progress?: number) => {
+  if (!ui.analysisStatus) return;
+  const labels: Record<string, string> = {
+    running: "运行中",
+    stopped: "已停止",
+    idle: "待机",
+  };
+  const base = labels[status] || status;
+  const label = progress !== undefined ? `${base} ${Math.round(progress * 100)}%` : base;
+  ui.analysisStatus.textContent = label;
 };
 
 const getWsUrl = (path: string, params: Record<string, string>) => {
@@ -489,6 +519,9 @@ const updateSourceInfo = (name: string | null) => {
   if (ui.sourceName) {
     ui.sourceName.textContent = name || "--";
   }
+  if (ui.sourceMeta) {
+    ui.sourceMeta.textContent = state.sourceId ? `ID ${state.sourceId.slice(0, 6)}` : "未选择";
+  }
 };
 
 const updateRegions = (regions: RegionItem[]) => {
@@ -528,12 +561,41 @@ const updateRegions = (regions: RegionItem[]) => {
     barFill.style.width = `${Math.min(100, Math.round((densityValue / maxDensity) * 100))}%`;
     bar.appendChild(barFill);
 
+    const meta = document.createElement("div");
+    meta.className = "region-meta";
+
     const label = document.createElement("em");
     label.textContent = getDensityLevel(densityValue);
 
+    const actions = document.createElement("div");
+    actions.className = "region-actions";
+    const config = state.regionConfigs.find((item) => item.name === region.name);
+    if (config?.region_id) {
+      const editButton = document.createElement("button");
+      editButton.type = "button";
+      editButton.className = "mini-button";
+      editButton.textContent = "编辑";
+      editButton.dataset.action = "edit-region";
+      editButton.dataset.regionId = config.region_id;
+      actions.appendChild(editButton);
+
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "mini-button danger";
+      deleteButton.textContent = "删除";
+      deleteButton.dataset.action = "delete-region";
+      deleteButton.dataset.regionId = config.region_id;
+      actions.appendChild(deleteButton);
+    }
+
+    meta.appendChild(label);
+    if (actions.childElementCount > 0) {
+      meta.appendChild(actions);
+    }
+
     row.appendChild(info);
     row.appendChild(bar);
-    row.appendChild(label);
+    row.appendChild(meta);
     ui.regionList.appendChild(row);
   });
 };
@@ -553,7 +615,7 @@ const renderAlerts = (items: AlertItem[]) => {
     return;
   }
 
-  items.slice(0, 3).forEach((item) => {
+  items.slice(0, 5).forEach((item) => {
     const row = document.createElement("div");
     const time = document.createElement("strong");
     const text = document.createElement("span");
@@ -671,16 +733,474 @@ const ensureSourceSelected = () => {
   return false;
 };
 
+const ensureHistorySourceSelected = () => {
+  if (state.historySourceId) return true;
+  alert("请先选择历史数据源");
+  return false;
+};
+
 const handleApiError = (error: unknown) => {
   const message = error instanceof Error ? error.message : "请求失败";
   console.error(message);
   alert(message);
 };
 
+const loadSources = async () => {
+  try {
+    const data = await apiGet<{ sources?: SourceItem[] }>(`/sources`);
+    return data.sources || [];
+  } catch (error) {
+    console.error("数据源加载失败", error);
+    return [];
+  }
+};
+
+const refreshHistorySourceOptions = async () => {
+  if (!ui.historySourceSelect) return;
+  const sources = await loadSources();
+  ui.historySourceSelect.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "选择数据源";
+  ui.historySourceSelect.appendChild(placeholder);
+  sources.forEach((source) => {
+    const option = document.createElement("option");
+    option.value = source.source_id;
+    option.textContent = source.name || source.source_id;
+    ui.historySourceSelect.appendChild(option);
+  });
+  if (state.historySourceId) {
+    ui.historySourceSelect.value = state.historySourceId;
+  }
+};
+
+const refreshHistoryRegionOptions = async () => {
+  if (!ui.historyRegionSelect) return;
+  ui.historyRegionSelect.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "全部区域";
+  ui.historyRegionSelect.appendChild(placeholder);
+  if (!state.historySourceId) {
+    ui.historyRegionSelect.value = "";
+    return;
+  }
+  try {
+    const data = await apiGet<{ regions?: RegionItem[] }>(
+      `/regions?source_id=${encodeURIComponent(state.historySourceId)}`
+    );
+    (data.regions || []).forEach((region) => {
+      if (!region.region_id) return;
+      const option = document.createElement("option");
+      option.value = region.region_id;
+      option.textContent = region.name || region.region_id;
+      ui.historyRegionSelect?.appendChild(option);
+    });
+  } catch (error) {
+    console.error("历史区域加载失败", error);
+  }
+  if (state.historyRegionId && ui.historyRegionSelect) {
+    ui.historyRegionSelect.value = state.historyRegionId;
+  } else {
+    ui.historyRegionSelect.value = "";
+  }
+};
+
+const populateHistoryMetricSelect = () => {
+  if (!ui.historyMetricSelect) return;
+  ui.historyMetricSelect.innerHTML = "";
+  HISTORY_METRICS.forEach((metric) => {
+    const option = document.createElement("option");
+    option.value = metric.key;
+    option.textContent = metric.label;
+    ui.historyMetricSelect.appendChild(option);
+  });
+  ui.historyMetricSelect.value = state.historyMetric;
+};
+
+const loadRegions = async () => {
+  if (!state.sourceId) return;
+  try {
+    const data = await apiGet<{ regions?: RegionItem[] }>(
+      `/regions?source_id=${encodeURIComponent(state.sourceId)}`
+    );
+    state.regionConfigs = data.regions || [];
+    updateRegions(
+      state.regionConfigs.map((item) => ({
+        name: item.name,
+        count: item.count ?? 0,
+        density: item.density ?? 0,
+      }))
+    );
+  } catch (error) {
+    console.error("区域配置加载失败", error);
+  }
+};
+
+const renderHistoryList = (data: HistoryResponse) => {
+  if (!ui.historyList) return;
+  ui.historyList.innerHTML = "";
+
+  const summaryRows: Array<{ label: string; value: string }> = [];
+  if (Number.isFinite(data.total_count_avg)) {
+    summaryRows.push({ label: "平均人数", value: formatCount(data.total_count_avg) });
+  }
+  if (Number.isFinite(data.total_count_max)) {
+    summaryRows.push({ label: "最大人数", value: formatCount(data.total_count_max) });
+  }
+  if (Number.isFinite(data.total_count_min)) {
+    summaryRows.push({ label: "最小人数", value: formatCount(data.total_count_min) });
+  }
+  if (Number.isFinite(data.total_density_avg)) {
+    summaryRows.push({ label: "平均密度", value: formatNumber(data.total_density_avg, 3) });
+  }
+  if (Number.isFinite(data.crowd_index_avg)) {
+    summaryRows.push({ label: "平均拥挤指数", value: formatNumber(data.crowd_index_avg, 2) });
+  }
+
+  let regionStats:
+    | Record<string, { name?: string; avg?: number; max?: number; min?: number; crowd_index?: number }>
+    | null = null;
+  if (typeof data.region_stats === "string") {
+    try {
+      regionStats = JSON.parse(data.region_stats);
+    } catch {
+      regionStats = null;
+    }
+  } else if (data.region_stats && typeof data.region_stats === "object") {
+    regionStats = data.region_stats as Record<
+      string,
+      { name?: string; avg?: number; max?: number; min?: number; crowd_index?: number }
+    >;
+  }
+
+  if (summaryRows.length === 0 && !regionStats) {
+    const empty = document.createElement("div");
+    const time = document.createElement("strong");
+    const text = document.createElement("span");
+    time.textContent = "--:--";
+    text.textContent = "暂无历史数据";
+    empty.appendChild(time);
+    empty.appendChild(text);
+    ui.historyList.appendChild(empty);
+    return;
+  }
+
+  summaryRows.forEach((item) => {
+    const row = document.createElement("div");
+    const label = document.createElement("strong");
+    const text = document.createElement("span");
+    label.textContent = item.label;
+    text.textContent = item.value;
+    row.appendChild(label);
+    row.appendChild(text);
+    ui.historyList.appendChild(row);
+  });
+
+  if (regionStats) {
+    Object.entries(regionStats).forEach(([key, stats]) => {
+    if (state.historyRegionId && key !== state.historyRegionId) {
+      if (!state.historyRegionName || key !== state.historyRegionName) return;
+    }
+      const row = document.createElement("div");
+      const label = document.createElement("strong");
+      const text = document.createElement("span");
+      const regionName = typeof stats.name === "string" ? stats.name : key;
+      label.textContent = `${regionName} 区域`;
+      const crowdIndex = Number.isFinite(stats.crowd_index)
+        ? ` / 拥挤指数 ${formatNumber(stats.crowd_index, 2)}`
+        : "";
+      text.textContent = `均值 ${formatCount(stats.avg)} / 峰值 ${formatCount(
+        stats.max
+      )} / 最低 ${formatCount(stats.min)}${crowdIndex}`;
+      row.appendChild(label);
+      row.appendChild(text);
+      ui.historyList.appendChild(row);
+    });
+  }
+};
+
+const buildHistorySeries = (data: HistoryResponse): HistorySeriesPoint[] => {
+  const series = data.series || [];
+  const regionKey = state.historyRegionId || state.historyRegionName;
+  return series.map((item) => {
+    let value: number | undefined;
+    if (regionKey && item.regions?.[regionKey]) {
+      value = item.regions[regionKey][state.historyMetric];
+    } else {
+      value = item[state.historyMetric];
+    }
+    return {
+      time: item.time,
+      value: Number.isFinite(value) ? (value as number) : NaN,
+    };
+  });
+};
+
+const renderHistoryFromCache = () => {
+  if (!state.historyData) {
+    renderHistoryEmpty("请选择历史数据源");
+    return;
+  }
+  renderHistoryList(state.historyData);
+  const points = buildHistorySeries(state.historyData);
+  const hasValid = points.some((point) => Number.isFinite(point.value));
+  if (!hasValid) {
+    renderHistoryEmpty("暂无历史趋势数据");
+    return;
+  }
+  renderHistoryChart(state.historyMetric, points);
+};
+
+const loadHistory = async () => {
+  if (!state.historySourceId) {
+    if (ui.historyList) {
+      ui.historyList.innerHTML = "";
+      const empty = document.createElement("div");
+      const time = document.createElement("strong");
+      const text = document.createElement("span");
+      time.textContent = "--:--";
+      text.textContent = "请选择历史数据源";
+      empty.appendChild(time);
+      empty.appendChild(text);
+      ui.historyList.appendChild(empty);
+    }
+    renderHistoryEmpty("请选择历史数据源");
+    state.historyData = null;
+    return;
+  }
+  try {
+    const to = new Date();
+    const from = new Date(to.getTime() - 30 * 60 * 1000);
+    const data = await apiGet<HistoryResponse>(
+      `/history?source_id=${encodeURIComponent(state.historySourceId)}&from=${encodeURIComponent(
+        from.toISOString()
+      )}&to=${encodeURIComponent(to.toISOString())}&interval=5m`
+    );
+    state.historyData = data;
+    renderHistoryFromCache();
+  } catch (error) {
+    console.error("历史数据加载失败", error);
+    renderHistoryEmpty("历史数据加载失败");
+  }
+};
+
+const renderHistoryEmpty = (message: string) => {
+  if (!state.historyChart) return;
+  state.historyChart.clear();
+  state.historyChart.setOption({
+    grid: { left: 0, right: 0, top: 0, bottom: 0 },
+    xAxis: { show: false },
+    yAxis: { show: false },
+    series: [],
+    graphic: {
+      type: "text",
+      left: "center",
+      top: "middle",
+      style: {
+        text: message,
+        fill: "#7C8DA6",
+        fontSize: 12,
+      },
+    },
+  });
+};
+
+const renderHistoryChart = (metricKey: HistoryMetricKey, points: HistorySeriesPoint[]) => {
+  if (!state.historyChart) return;
+  const meta = getMetricMeta(metricKey);
+  const sorted = [...points].sort(
+    (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()
+  );
+  const values = sorted.map((item) => item.value).filter((value) => Number.isFinite(value));
+  if (!values.length) {
+    renderHistoryEmpty("暂无历史数据");
+    return;
+  }
+
+  const maxValue = Math.max(...values);
+  const minValue = Math.min(...values);
+  const yMax =
+    meta.max ??
+    (maxValue === minValue ? maxValue + 1 : Math.ceil(maxValue * 1.05 * 1000) / 1000);
+  const yMin = meta.min ?? (minValue > 0 ? 0 : Math.floor(minValue * 0.95 * 1000) / 1000);
+
+  state.historyChart.setOption({
+    color: [meta.color],
+    tooltip: {
+      trigger: "axis",
+      valueFormatter: (value) =>
+        `${formatMetricValue(metricKey, Number(value))}${meta.unit ? ` ${meta.unit}` : ""}`,
+    },
+    grid: { left: 20, right: 20, top: 18, bottom: 32, containLabel: true },
+    xAxis: {
+      type: "category",
+      data: sorted.map((item) => item.time),
+      axisLabel: {
+        color: "#6F829B",
+        formatter: formatHistoryTime,
+      },
+      axisLine: { lineStyle: { color: "rgba(59, 143, 246, 0.2)" } },
+      axisTick: { show: false },
+    },
+    yAxis: {
+      type: "value",
+      min: yMin,
+      max: yMax,
+      name: meta.label,
+      nameTextStyle: { color: "#8AA1C1", padding: [0, 0, 8, 0] },
+      axisLabel: {
+        color: "#6F829B",
+        formatter: (value: number) => formatMetricValue(metricKey, value),
+      },
+      splitLine: { lineStyle: { color: "rgba(59, 143, 246, 0.12)" } },
+    },
+    series: [
+      {
+        name: meta.label,
+        type: "line",
+        data: sorted.map((item) => item.value),
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 2 },
+        areaStyle: { color: meta.color, opacity: 0.18 },
+      },
+    ],
+    graphic: [],
+  });
+};
+
+const initHistoryChart = () => {
+  if (!ui.historyChart) return;
+  state.historyChart = echarts.init(ui.historyChart);
+  renderHistoryEmpty("请选择历史数据源");
+};
+
+const loadRecentAlerts = async () => {
+  if (!state.sourceId) return;
+  try {
+    const data = await apiGet<{ items?: AlertItem[] }>(
+      `/alerts/recent?source_id=${encodeURIComponent(state.sourceId)}`
+    );
+    state.alertItems = data.items || [];
+    updateAlertCount();
+    renderAlerts(state.alertItems);
+  } catch (error) {
+    console.error("告警记录加载失败", error);
+  }
+};
+
+const loadAnalysisStatus = async () => {
+  if (!state.sourceId) return;
+  try {
+    const data = await apiGet<{ status?: string; progress?: number }>(
+      `/analysis/status?source_id=${encodeURIComponent(state.sourceId)}`
+    );
+    if (data.status) {
+      setAnalysisStatus(data.status, data.progress);
+    }
+  } catch (error) {
+    console.error("状态查询失败", error);
+  }
+};
+
+const startStatusPolling = () => {
+  if (state.analysisStatusTimer) {
+    window.clearInterval(state.analysisStatusTimer);
+  }
+  state.analysisStatusTimer = window.setInterval(loadAnalysisStatus, 5000);
+};
+
+const stopStatusPolling = () => {
+  if (state.analysisStatusTimer) {
+    window.clearInterval(state.analysisStatusTimer);
+    state.analysisStatusTimer = null;
+  }
+};
+
+const setHistoryMetric = (metricKey: HistoryMetricKey) => {
+  state.historyMetric = metricKey;
+  if (ui.historyMetricSelect) {
+    ui.historyMetricSelect.value = metricKey;
+  }
+  renderHistoryFromCache();
+};
+
+const parsePointsInput = (input: string) => {
+  const parsed = JSON.parse(input);
+  if (!Array.isArray(parsed)) {
+    throw new Error("坐标格式必须是二维数组");
+  }
+  return parsed as number[][];
+};
+
+const promptRegionConfig = (existing?: RegionItem) => {
+  const name = window.prompt("区域名称", existing?.name || "");
+  if (!name) return null;
+  const color = window.prompt("区域颜色（如 #3B8FF6）", existing?.color || "#3B8FF6");
+  if (!color) return null;
+  const defaultPoints = existing?.points ? JSON.stringify(existing.points) : "[[0,0],[100,0],[100,100],[0,100]]";
+  const pointsInput = window.prompt("区域坐标（JSON 数组）", defaultPoints);
+  if (!pointsInput) return null;
+  try {
+    const points = parsePointsInput(pointsInput);
+    return { name, color, points };
+  } catch (error) {
+    alert("坐标格式有误，请输入合法的 JSON 数组");
+    return null;
+  }
+};
+
+const createRegion = async () => {
+  if (!state.sourceId) return;
+  const config = promptRegionConfig();
+  if (!config) return;
+  await apiPost(`/regions`, {
+    source_id: state.sourceId,
+    ...config,
+  });
+  await loadRegions();
+};
+
+const updateRegion = async (regionId: string) => {
+  const existing = state.regionConfigs.find((item) => item.region_id === regionId);
+  const config = promptRegionConfig(existing);
+  if (!config) return;
+  await apiRequest(`/regions/${encodeURIComponent(regionId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  await loadRegions();
+};
+
+const deleteRegion = async (regionId: string) => {
+  const confirmed = window.confirm("确定删除该区域？");
+  if (!confirmed) return;
+  await apiRequest(`/regions/${encodeURIComponent(regionId)}`, { method: "DELETE" });
+  await loadRegions();
+};
+
 const setSource = (sourceId: string, name?: string) => {
   state.sourceId = sourceId;
   state.sourceName = name || null;
   updateSourceInfo(name || null);
+  void loadRegions();
+  void loadAnalysisStatus();
+  void loadRecentAlerts();
+  void refreshHistorySourceOptions();
+};
+
+const setHistorySource = (sourceId: string, name?: string) => {
+  state.historySourceId = sourceId;
+  state.historySourceName = name || sourceId;
+  state.historyRegionId = null;
+  state.historyRegionName = null;
+  void loadHistory();
+  void refreshHistoryRegionOptions();
+  if (ui.historySourceSelect) {
+    ui.historySourceSelect.value = sourceId;
+  }
 };
 
 const loadThreshold = async () => {
@@ -739,6 +1259,10 @@ const loadSystemStatus = async () => {
 };
 
 loadSystemStatus();
+populateHistoryMetricSelect();
+initHistoryChart();
+void refreshHistorySourceOptions();
+setHistoryMetric(state.historyMetric);
 
 if (ui.actionButtons.fullscreen) {
   ui.actionButtons.fullscreen.addEventListener("click", () => {
@@ -787,34 +1311,6 @@ if (ui.actionButtons.sourceUpload) {
   });
 }
 
-if (ui.actionButtons.sourceHistory) {
-  ui.actionButtons.sourceHistory.addEventListener("click", async () => {
-    try {
-      const data = await apiGet<{ sources?: { source_id: string; name?: string }[] }>(`/sources`);
-      const sources = data.sources || [];
-      if (!sources.length) {
-        alert("暂无可用数据源");
-        return;
-      }
-      const options = sources
-        .map((source, index) => `${index + 1}. ${source.name || source.source_id}`)
-        .join("\n");
-      const choice = window.prompt(`请选择数据源：\n${options}`, "1");
-      if (!choice) return;
-      const index = Number(choice) - 1;
-      const selected = sources[index] || sources.find((item) => item.source_id === choice);
-      if (!selected) {
-        alert("选择无效");
-        return;
-      }
-      setSource(selected.source_id, selected.name || "历史回放");
-      await loadThreshold();
-    } catch (error) {
-      handleApiError(error);
-    }
-  });
-}
-
 if (ui.actionButtons.startAnalysis) {
   ui.actionButtons.startAnalysis.addEventListener("click", async () => {
     if (!ensureSourceSelected()) return;
@@ -822,6 +1318,23 @@ if (ui.actionButtons.startAnalysis) {
       await apiPost(`/analysis/start`, { source_id: state.sourceId });
       connectRealtime(state.sourceId!);
       connectAlerts(state.sourceId!);
+      setAnalysisStatus("running");
+      startStatusPolling();
+    } catch (error) {
+      handleApiError(error);
+    }
+  });
+}
+
+if (ui.actionButtons.stopAnalysis) {
+  ui.actionButtons.stopAnalysis.addEventListener("click", async () => {
+    if (!ensureSourceSelected()) return;
+    try {
+      await apiPost(`/analysis/stop`, { source_id: state.sourceId });
+      closeSocket(state.realtimeSocket);
+      closeSocket(state.alertSocket);
+      setAnalysisStatus("stopped");
+      stopStatusPolling();
     } catch (error) {
       handleApiError(error);
     }
@@ -830,29 +1343,28 @@ if (ui.actionButtons.startAnalysis) {
 
 if (ui.actionButtons.snapshot) {
   ui.actionButtons.snapshot.addEventListener("click", async () => {
-    if (!ensureSourceSelected()) return;
-    try {
-      const data = await apiPost<{ url?: string }>(`/frame/snapshot`, { source_id: state.sourceId });
-      if (data.url) {
-        window.open(data.url, "_blank");
-      }
-    } catch (error) {
-      handleApiError(error);
-    }
+    alert("截图功能暂未实现");
   });
 }
 
 if (ui.actionButtons.exportClip) {
   ui.actionButtons.exportClip.addEventListener("click", async () => {
-    if (!ensureSourceSelected()) return;
+    alert("导出片段功能暂未实现");
+  });
+}
+
+if (ui.actionButtons.exportHistory) {
+  ui.actionButtons.exportHistory.addEventListener("click", async () => {
+    if (!ensureHistorySourceSelected()) return;
     const to = new Date();
-    const from = new Date(to.getTime() - 5 * 60 * 1000);
+    const from = new Date(to.getTime() - 30 * 60 * 1000);
+    const format = ui.historyExportFormat?.value || "csv";
     try {
-      const data = await apiPost<{ url?: string }>(`/clip/export`, {
-        source_id: state.sourceId,
-        from: from.toISOString(),
-        to: to.toISOString(),
-      });
+      const data = await apiGet<{ url?: string }>(
+        `/export?source_id=${encodeURIComponent(state.historySourceId!)}&from=${encodeURIComponent(
+          from.toISOString()
+        )}&to=${encodeURIComponent(to.toISOString())}&format=${encodeURIComponent(format)}`
+      );
       if (data.url) {
         window.open(data.url, "_blank");
       }
@@ -862,14 +1374,14 @@ if (ui.actionButtons.exportClip) {
   });
 }
 
-if (ui.actionButtons.exportCsv) {
-  ui.actionButtons.exportCsv.addEventListener("click", async () => {
+if (ui.actionButtons.exportAlerts) {
+  ui.actionButtons.exportAlerts.addEventListener("click", async () => {
     if (!ensureSourceSelected()) return;
     const to = new Date();
-    const from = new Date(to.getTime() - 30 * 60 * 1000);
+    const from = new Date(to.getTime() - 24 * 60 * 60 * 1000);
     try {
       const data = await apiGet<{ url?: string }>(
-        `/export?source_id=${encodeURIComponent(state.sourceId!)}&from=${encodeURIComponent(
+        `/alerts/export?source_id=${encodeURIComponent(state.sourceId!)}&from=${encodeURIComponent(
           from.toISOString()
         )}&to=${encodeURIComponent(to.toISOString())}&format=csv`
       );
@@ -886,8 +1398,79 @@ if (ui.actionButtons.customRegions) {
   ui.actionButtons.customRegions.addEventListener("click", async () => {
     if (!ensureSourceSelected()) return;
     try {
-      await apiGet(`/regions?source_id=${encodeURIComponent(state.sourceId!)}`);
-      alert("区域配置接口已触发，请在后端实现配置流程。");
+      await loadRegions();
+      alert("区域配置已刷新，可在列表中编辑或删除。");
+    } catch (error) {
+      handleApiError(error);
+    }
+  });
+}
+
+if (ui.actionButtons.addRegion) {
+  ui.actionButtons.addRegion.addEventListener("click", async () => {
+    if (!ensureSourceSelected()) return;
+    try {
+      await createRegion();
+    } catch (error) {
+      handleApiError(error);
+    }
+  });
+}
+
+if (ui.historySourceSelect) {
+  ui.historySourceSelect.addEventListener("change", async () => {
+    const selectedId = ui.historySourceSelect?.value || "";
+    if (!selectedId) {
+      state.historySourceId = null;
+      state.historySourceName = "未选择";
+      state.historyRegionId = null;
+      state.historyRegionName = null;
+      if (ui.historyRegionSelect) {
+        ui.historyRegionSelect.value = "";
+      }
+      await loadHistory();
+      renderHistoryEmpty("请选择历史数据源");
+      return;
+    }
+    const name = ui.historySourceSelect.selectedOptions[0]?.textContent?.trim();
+    setHistorySource(selectedId, name || selectedId);
+  });
+}
+
+if (ui.historyRegionSelect) {
+  ui.historyRegionSelect.addEventListener("change", () => {
+    const selectedId = ui.historyRegionSelect?.value || "";
+    state.historyRegionId = selectedId || null;
+    state.historyRegionName = selectedId
+      ? ui.historyRegionSelect?.selectedOptions[0]?.textContent?.trim() || null
+      : null;
+    renderHistoryFromCache();
+  });
+}
+
+if (ui.historyMetricSelect) {
+  ui.historyMetricSelect.addEventListener("change", () => {
+    const value = ui.historyMetricSelect?.value as HistoryMetricKey;
+    if (!value) return;
+    setHistoryMetric(value);
+  });
+}
+
+if (ui.regionList) {
+  ui.regionList.addEventListener("click", async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const button = target.closest("button");
+    if (!button) return;
+    const regionId = button.dataset.regionId;
+    if (!regionId) return;
+    try {
+      if (button.dataset.action === "edit-region") {
+        await updateRegion(regionId);
+      }
+      if (button.dataset.action === "delete-region") {
+        await deleteRegion(regionId);
+      }
     } catch (error) {
       handleApiError(error);
     }
@@ -983,7 +1566,7 @@ if (dashboard) {
   };
 
   panels.forEach((panel) => {
-    const handle = panel.querySelector(".drag-handle");
+    const handle = panel.querySelector(".panel-header");
     panel.querySelectorAll(".resize-handle").forEach((existing) => existing.remove());
 
     const resizeDirections = ["top", "right", "bottom", "left"];
@@ -1000,7 +1583,12 @@ if (dashboard) {
     panel.setAttribute("draggable", "false");
 
     if (handle) {
-      const enableDrag = () => {
+      const isInteractive = (target: EventTarget | null) =>
+        target instanceof HTMLElement &&
+        Boolean(target.closest("button, select, input, textarea, option, a"));
+
+      const enableDrag = (event: PointerEvent) => {
+        if (isInteractive(event.target)) return;
         panel.setAttribute("draggable", "true");
         panel.classList.add("drag-ready");
       };
@@ -1098,6 +1686,7 @@ if (dashboard) {
             window.removeEventListener("pointerup", onUp);
             window.removeEventListener("pointercancel", onUp);
             normalizePanelSpans();
+            state.historyChart?.resize();
           };
 
           window.addEventListener("pointermove", onMove);
@@ -1141,6 +1730,7 @@ if (dashboard) {
             panel.style.setProperty("--panel-row-start", `${rowStart}`);
           }
           normalizePanelSpans();
+          state.historyChart?.resize();
         });
       }
     });
@@ -1167,5 +1757,8 @@ if (dashboard) {
     event.preventDefault();
   });
 
-  window.addEventListener("resize", normalizePanelSpans);
+  window.addEventListener("resize", () => {
+    normalizePanelSpans();
+    state.historyChart?.resize();
+  });
 }
