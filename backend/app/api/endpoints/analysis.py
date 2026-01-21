@@ -53,14 +53,33 @@ _tasks: dict[str, asyncio.Task] = {}
 _executor = ThreadPoolExecutor(max_workers=4)
 
 
-def _get_regions_dict(regions: list) -> dict[str, list[tuple]]:
-    """将数据库区域转换为 YOLO 服务需要的格式"""
+def _get_regions_dict(regions: list, img_width: int = 0, img_height: int = 0) -> dict[str, list[tuple]]:
+    """
+    将数据库区域转换为 YOLO 服务需要的格式
+
+    Args:
+        regions: 区域配置列表
+        img_width: 图像宽度（用于将百分比坐标转换为像素坐标）
+        img_height: 图像高度
+
+    Returns:
+        区域字典 {name: [(x1,y1), (x2,y2), ...]}
+    """
     result = {}
     for region in regions:
         if region.points:
             try:
                 points = json.loads(region.points) if isinstance(region.points, str) else region.points
-                result[region.name] = [tuple(p) for p in points]
+                # 如果提供了图像尺寸，将百分比坐标转换为像素坐标
+                if img_width > 0 and img_height > 0:
+                    converted_points = []
+                    for p in points:
+                        x = p[0] * img_width / 100.0
+                        y = p[1] * img_height / 100.0
+                        converted_points.append((int(x), int(y)))
+                    result[region.name] = converted_points
+                else:
+                    result[region.name] = [tuple(p) for p in points]
             except json.JSONDecodeError:
                 logger.warning(f"区域 {region.name} 的多边形点解析失败")
     return result
@@ -69,17 +88,6 @@ def _get_regions_dict(regions: list) -> dict[str, list[tuple]]:
 def _get_region_id_map(regions: list) -> dict[str, str]:
     """构建区域名称到 ID 的映射"""
     return {region.name: region.region_id for region in regions}
-
-
-def _calculate_crowd_index(count: int, critical_threshold: int) -> float:
-    """
-    计算拥挤指数
-
-    crowd_index = current_count / critical_threshold
-    """
-    if critical_threshold <= 0:
-        return 0.0
-    return round(count / critical_threshold, 3)
 
 
 async def _inference_loop(source_id: str) -> None:
@@ -108,13 +116,27 @@ async def _inference_loop(source_id: str) -> None:
             logger.error(f"数据源无有效路径: {source_id}")
             return
 
-        # 2. 获取区域配置
+        # 2. 先打开视频源获取尺寸信息
+        video_service = VideoService(video_path)
+        if not video_service.open():
+            logger.error(f"无法打开视频源: {video_path}")
+            source_repo.update_status(source_id, "error")
+            return
+
+        video_info = video_service.get_info()
+        frame_interval = 1.0 / video_info.fps if video_info.fps > 0 else 1.0 / 30.0
+
+        logger.info(f"视频源已打开: {video_path}, 尺寸={video_info.width}x{video_info.height}, FPS={video_info.fps}")
+
+        # 3. 获取区域配置并转换为像素坐标
         region_repo = RegionRepository(db)
         regions = region_repo.get_by_source_id(source_id)
-        regions_dict = _get_regions_dict(regions)
+        regions_dict = _get_regions_dict(regions, video_info.width, video_info.height)
         region_id_map = _get_region_id_map(regions)
 
-        # 3. 获取告警阈值配置
+        logger.info(f"区域配置: {list(regions_dict.keys()) if regions_dict else '无'}")
+
+        # 4. 获取告警阈值配置
         config_repo = AlertConfigRepository(db)
         alert_config_db = config_repo.get_by_source_id(source_id)
 
@@ -147,7 +169,7 @@ async def _inference_loop(source_id: str) -> None:
         else:
             alert_config = AlertConfig()
 
-        # 4. 初始化服务
+        # 5. 初始化服务
         yolo_service = YOLOService(
             model_path=settings.YOLO_MODEL_PATH,
             regions=regions_dict if regions_dict else None,
@@ -156,18 +178,6 @@ async def _inference_loop(source_id: str) -> None:
         )
         alert_service = AlertService(config=alert_config)
         alert_repo = AlertRepository(db)
-
-        # 5. 打开视频源
-        video_service = VideoService(video_path)
-        if not video_service.open():
-            logger.error(f"无法打开视频源: {video_path}")
-            source_repo.update_status(source_id, "error")
-            return
-
-        video_info = video_service.get_info()
-        frame_interval = 1.0 / video_info.fps if video_info.fps > 0 else 1.0 / 30.0
-
-        logger.info(f"视频源已打开: {video_path}, FPS={video_info.fps}")
 
         # 6. 推理循环
         frame_count = 0
@@ -191,24 +201,16 @@ async def _inference_loop(source_id: str) -> None:
                     _executor, yolo_service.process, frame
                 )
 
-                # 计算 crowd_index
-                crowd_index = _calculate_crowd_index(result.total_count, total_critical)
-
-                # 计算各区域 crowd_index
+                # 构建各区域帧统计（确保所有配置的区域都返回，即使人数为0）
                 region_frame_stats = []
-                for region_name, count in result.region_counts.items():
-                    region_critical = region_thresholds.get(
-                        region_name,
-                        alert_config.default_region_critical
-                    )
-                    region_crowd_index = _calculate_crowd_index(count, region_critical)
-
+                for region_name in regions_dict.keys():
+                    count = result.region_counts.get(region_name, 0)
+                    density = result.region_densities.get(region_name, 0.0)
                     region_frame_stats.append(RegionFrameStats(
                         region_id=region_id_map.get(region_name, ""),
                         name=region_name,
                         count=count,
-                        density=result.region_densities.get(region_name, 0.0),
-                        crowd_index=region_crowd_index,
+                        density=density,
                     ))
 
                 # 告警检查
@@ -250,7 +252,6 @@ async def _inference_loop(source_id: str) -> None:
                     timestamp=timestamp,
                     total_count=result.total_count,
                     total_density=result.total_density,
-                    crowd_index=crowd_index,
                     regions=region_frame_stats,
                 )
                 stats_aggregator.collect(frame_stats)
@@ -272,7 +273,6 @@ async def _inference_loop(source_id: str) -> None:
                         total_count_max=rf.count,
                         total_count_min=rf.count,
                         total_density_avg=rf.density,
-                        crowd_index_avg=rf.crowd_index,
                     )
 
                 # WebSocket 推送实时帧
@@ -282,7 +282,6 @@ async def _inference_loop(source_id: str) -> None:
                     total_count=result.total_count,
                     total_density=result.total_density,
                     regions=regions_realtime,
-                    crowd_index=crowd_index,
                     entry_speed=0.0,  # TODO: 计算入场速度
                 )
                 await ws_manager.send_frame(source_id, realtime_frame)
@@ -342,8 +341,8 @@ async def start_analysis(
         # raise HTTPException(status_code=400, detail="分析任务已在运行中")
 
     # 检查是否已有运行中的任务
-    # if request.source_id in _tasks and not _tasks[request.source_id].done():
-        # raise HTTPException(status_code=400, detail="分析任务已在运行中")
+    if request.source_id in _tasks and not _tasks[request.source_id].done():
+        raise HTTPException(status_code=400, detail="分析任务已在运行中")
 
     # 更新数据源状态
     source_repo.update_status(request.source_id, "running")

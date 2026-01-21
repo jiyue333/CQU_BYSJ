@@ -84,9 +84,9 @@ if (app) {
               <em>密度系数</em>
             </div>
             <div class="stat-card">
-              <span>拥挤指数</span>
+              <span>密度等级</span>
               <strong data-stat-index>--</strong>
-              <em>稳定</em>
+              <em>实时状态</em>
             </div>
             <div class="stat-card">
               <span>预警次数</span>
@@ -241,21 +241,20 @@ const API_BASE = "/api";
 const WS_BASE = "/api/ws";
 const WS_RETRY_BASE_MS = 1000;
 const WS_RETRY_MAX_MS = 10000;
-const HISTORY_METRICS = [
+const HISTORY_METRICS: readonly {
+  key: string;
+  label: string;
+  unit: string;
+  digits: number;
+  color: string;
+  min: number;
+  max?: number;
+}[] = [
   { key: "total_count_avg", label: "平均人数", unit: "人", digits: 0, color: "#3B8FF6", min: 0 },
   { key: "total_count_max", label: "最大人数", unit: "人", digits: 0, color: "#5BC0EB", min: 0 },
   { key: "total_count_min", label: "最小人数", unit: "人", digits: 0, color: "#2F7DE1", min: 0 },
-  { key: "total_density_avg", label: "平均密度", unit: "", digits: 3, color: "#6BB6FF", min: 0 },
-  {
-    key: "crowd_index_avg",
-    label: "平均拥挤指数",
-    unit: "",
-    digits: 2,
-    color: "#E46A5E",
-    min: 0,
-    max: 1,
-  },
-] as const;
+  { key: "total_density_avg", label: "平均密度", unit: "", digits: 2, color: "#6BB6FF", min: 0, max: 100 },
+];
 
 const REGION_TEMPLATES = [
   {
@@ -326,15 +325,14 @@ type SourceItem = {
   created_at?: string;
 };
 
+type HistoryMetricKey = string;
 type HistoryMetric = typeof HISTORY_METRICS[number];
-type HistoryMetricKey = HistoryMetric["key"];
 
 type HistorySummary = {
   total_count_avg?: number;
   total_count_max?: number;
   total_count_min?: number;
   total_density_avg?: number;
-  crowd_index_avg?: number;
 };
 
 type HistorySeriesPoint = {
@@ -348,7 +346,6 @@ type HistorySeriesItem = {
   total_count_max?: number;
   total_count_min?: number;
   total_density_avg?: number;
-  crowd_index_avg?: number;
   regions?: Record<
     string,
     {
@@ -356,7 +353,6 @@ type HistorySeriesItem = {
       total_count_max?: number;
       total_count_min?: number;
       total_density_avg?: number;
-      crowd_index_avg?: number;
     }
   >;
 };
@@ -451,16 +447,6 @@ const formatCount = (value: number | undefined | null) => {
   return `${Math.round(value!)}`;
 };
 
-const formatRate = (value: number | undefined | null) => {
-  if (!Number.isFinite(value)) return "--";
-  return `${Math.round(value!)} 人/分`;
-};
-
-const formatIndex = (value: number | undefined | null) => {
-  if (!Number.isFinite(value)) return "--";
-  return value!.toFixed(2);
-};
-
 const toNumberArray = (values: Array<number | undefined>) =>
   values.filter((value): value is number => Number.isFinite(value));
 
@@ -479,7 +465,7 @@ const minValue = (values: number[]) => {
   return Math.min(...values);
 };
 
-const getMetricMeta = (metricKey: HistoryMetricKey) =>
+const getMetricMeta = (metricKey: HistoryMetricKey): HistoryMetric =>
   HISTORY_METRICS.find((item) => item.key === metricKey) || HISTORY_METRICS[0];
 
 const formatMetricValue = (metricKey: HistoryMetricKey, value: number | undefined | null) => {
@@ -498,15 +484,15 @@ const formatHistoryTime = (value: string) => {
 
 const getDensityLevel = (value: number | undefined | null) => {
   if (!Number.isFinite(value)) return "--";
-  if (value! >= 0.008) return "拥挤";
-  if (value! >= 0.005) return "正常";
+  if (value! >= 6) return "拥挤";
+  if (value! >= 3) return "正常";
   return "宽松";
 };
 
 const getDensityClass = (value: number | undefined | null) => {
   if (!Number.isFinite(value)) return "low";
-  if (value! >= 0.008) return "high";
-  if (value! >= 0.005) return "mid";
+  if (value! >= 6) return "high";
+  if (value! >= 3) return "mid";
   return "low";
 };
 
@@ -634,8 +620,9 @@ const updateSourceInfo = (name: string | null) => {
 
 const updateRegions = (regions: RegionItem[]) => {
   if (!ui.regionList) return;
-  ui.regionList.innerHTML = "";
+
   if (!regions.length) {
+    ui.regionList.innerHTML = "";
     const empty = document.createElement("div");
     empty.className = "region-note";
     empty.textContent = "暂无区域数据";
@@ -643,68 +630,120 @@ const updateRegions = (regions: RegionItem[]) => {
     return;
   }
 
-  const densities = regions.map((item) => item.density || 0);
-  const maxDensity = Math.max(...densities, 0.001);
+  // 获取现有的行元素（按区域名索引）
+  const existingRows = new Map<string, HTMLElement>();
+  ui.regionList.querySelectorAll<HTMLElement>(".region-row").forEach((row) => {
+    const nameEl = row.querySelector(".region-info span");
+    if (nameEl?.textContent) {
+      existingRows.set(nameEl.textContent, row);
+    }
+  });
+
+  // 清除非 region-row 的元素（如 region-note）
+  ui.regionList.querySelectorAll(".region-note").forEach((el) => el.remove());
+
+  // 记录需要保留的区域名
+  const activeNames = new Set(regions.map((r) => r.name || "区域"));
+
+  // 移除不再存在的区域行
+  existingRows.forEach((row, name) => {
+    if (!activeNames.has(name)) {
+      row.remove();
+    }
+  });
 
   regions.forEach((region) => {
-    const row = document.createElement("div");
-    row.className = "region-row";
-
-    const info = document.createElement("div");
-    info.className = "region-info";
-
-    const name = document.createElement("span");
-    name.textContent = region.name || "区域";
-    const count = document.createElement("strong");
-    count.textContent = `${formatCount(region.count)} 人`;
-
-    info.appendChild(name);
-    info.appendChild(count);
-
-    const bar = document.createElement("div");
-    bar.className = "bar";
-    const barFill = document.createElement("div");
+    const regionName = region.name || "区域";
     const densityValue = region.density || 0;
-    barFill.className = `bar-fill ${getDensityClass(densityValue)}`;
-    barFill.style.width = `${Math.min(100, Math.round((densityValue / maxDensity) * 100))}%`;
-    bar.appendChild(barFill);
+    // 密度值范围 0-10，乘以 10 作为进度条百分比
+    const barWidthPercent = Math.min(100, Math.round(densityValue * 10));
+    const densityClass = getDensityClass(densityValue);
 
-    const meta = document.createElement("div");
-    meta.className = "region-meta";
+    let row = existingRows.get(regionName);
 
-    const label = document.createElement("em");
-    label.textContent = getDensityLevel(densityValue);
+    if (row) {
+      // 更新现有行
+      const countEl = row.querySelector<HTMLElement>(".region-info strong");
+      if (countEl) {
+        countEl.textContent = `${formatCount(region.count)} 人`;
+      }
 
-    const actions = document.createElement("div");
-    actions.className = "region-actions";
-    const config = state.regionConfigs.find((item) => item.name === region.name);
-    if (config?.region_id) {
-      const editButton = document.createElement("button");
-      editButton.type = "button";
-      editButton.className = "mini-button";
-      editButton.textContent = "编辑";
-      editButton.dataset.action = "edit-region";
-      editButton.dataset.regionId = config.region_id;
-      actions.appendChild(editButton);
+      const barFill = row.querySelector<HTMLElement>(".bar-fill");
+      if (barFill) {
+        barFill.style.width = `${barWidthPercent}%`;
+        barFill.className = `bar-fill ${densityClass}`;
+      }
 
-      const deleteButton = document.createElement("button");
-      deleteButton.type = "button";
-      deleteButton.className = "mini-button danger";
-      deleteButton.textContent = "删除";
-      deleteButton.dataset.action = "delete-region";
-      deleteButton.dataset.regionId = config.region_id;
-      actions.appendChild(deleteButton);
+      const labelEl = row.querySelector<HTMLElement>(".region-meta em");
+      if (labelEl) {
+        labelEl.textContent = getDensityLevel(densityValue);
+      }
+    } else {
+      // 创建新行
+      row = document.createElement("div");
+      row.className = "region-row";
+
+      const info = document.createElement("div");
+      info.className = "region-info";
+
+      const name = document.createElement("span");
+      name.textContent = regionName;
+      const count = document.createElement("strong");
+      count.textContent = `${formatCount(region.count)} 人`;
+
+      info.appendChild(name);
+      info.appendChild(count);
+
+      const bar = document.createElement("div");
+      bar.className = "bar";
+      const barFill = document.createElement("div");
+      barFill.className = `bar-fill ${densityClass}`;
+      // 先设置 0 宽度，然后在下一帧设置目标宽度，触发过渡动画
+      barFill.style.width = "0%";
+      bar.appendChild(barFill);
+
+      const meta = document.createElement("div");
+      meta.className = "region-meta";
+
+      const label = document.createElement("em");
+      label.textContent = getDensityLevel(densityValue);
+
+      const actions = document.createElement("div");
+      actions.className = "region-actions";
+      const config = state.regionConfigs.find((item) => item.name === region.name);
+      if (config?.region_id) {
+        const editButton = document.createElement("button");
+        editButton.type = "button";
+        editButton.className = "mini-button";
+        editButton.textContent = "编辑";
+        editButton.dataset.action = "edit-region";
+        editButton.dataset.regionId = config.region_id;
+        actions.appendChild(editButton);
+
+        const deleteButton = document.createElement("button");
+        deleteButton.type = "button";
+        deleteButton.className = "mini-button danger";
+        deleteButton.textContent = "删除";
+        deleteButton.dataset.action = "delete-region";
+        deleteButton.dataset.regionId = config.region_id;
+        actions.appendChild(deleteButton);
+      }
+
+      meta.appendChild(label);
+      if (actions.childElementCount > 0) {
+        meta.appendChild(actions);
+      }
+
+      row.appendChild(info);
+      row.appendChild(bar);
+      row.appendChild(meta);
+      ui.regionList.appendChild(row);
+
+      // 使用 requestAnimationFrame 触发过渡动画
+      requestAnimationFrame(() => {
+        barFill.style.width = `${barWidthPercent}%`;
+      });
     }
-
-    meta.appendChild(label);
-    if (actions.childElementCount > 0) {
-      meta.appendChild(actions);
-    }
-
-    row.appendChild(info);
-    row.appendChild(bar);
-    row.appendChild(meta);
-    ui.regionList.appendChild(row);
   });
 };
 
@@ -785,11 +824,9 @@ const updateRealtime = (payload: {
   total_count?: number;
   total_density?: number;
   regions?: unknown;
-  crowd_index?: number;
 }) => {
   const total = payload.total_count;
   const density = payload.total_density;
-  const crowdIndex = payload.crowd_index;
 
   if (typeof payload.frame === "string" && ui.videoFrame) {
     const src = payload.frame.startsWith("data:")
@@ -802,11 +839,8 @@ const updateRealtime = (payload: {
   setText(ui.statTotal, formatCount(total));
 
   if (Number.isFinite(density)) {
-    setText(ui.statEntry, formatNumber(density, 3));
-  }
-
-  if (Number.isFinite(crowdIndex)) {
-    setText(ui.statIndex, formatIndex(crowdIndex));
+    setText(ui.statEntry, formatNumber(density, 2));
+    setText(ui.statIndex, getDensityLevel(density));
   }
 
   const normalizedRegions = normalizeRealtimeRegions(payload.regions);
@@ -1065,10 +1099,6 @@ const renderHistoryList = (data: HistoryResponse) => {
     Number.isFinite(data.total_density_avg) && data.total_density_avg !== undefined
       ? data.total_density_avg
       : average(toNumberArray(series.map((item) => item.total_density_avg)));
-  const crowdIndexAvg =
-    Number.isFinite(data.crowd_index_avg) && data.crowd_index_avg !== undefined
-      ? data.crowd_index_avg
-      : average(toNumberArray(series.map((item) => item.crowd_index_avg)));
 
   if (Number.isFinite(totalCountAvg)) {
     summaryRows.push({ label: "平均人数", value: formatCount(totalCountAvg) });
@@ -1080,10 +1110,7 @@ const renderHistoryList = (data: HistoryResponse) => {
     summaryRows.push({ label: "最小人数", value: formatCount(totalCountMin) });
   }
   if (Number.isFinite(totalDensityAvg)) {
-    summaryRows.push({ label: "平均密度", value: formatNumber(totalDensityAvg, 3) });
-  }
-  if (Number.isFinite(crowdIndexAvg)) {
-    summaryRows.push({ label: "平均拥挤指数", value: formatNumber(crowdIndexAvg, 2) });
+    summaryRows.push({ label: "平均密度", value: formatNumber(totalDensityAvg, 2) });
   }
 
   const regionAggregates: Record<
@@ -1093,8 +1120,8 @@ const renderHistoryList = (data: HistoryResponse) => {
       countCount: number;
       max?: number;
       min?: number;
-      crowdSum: number;
-      crowdCount: number;
+      densitySum: number;
+      densityCount: number;
     }
   > = {};
 
@@ -1105,8 +1132,8 @@ const renderHistoryList = (data: HistoryResponse) => {
         regionAggregates[regionId] = {
           countSum: 0,
           countCount: 0,
-          crowdSum: 0,
-          crowdCount: 0,
+          densitySum: 0,
+          densityCount: 0,
         };
       }
       const aggregate = regionAggregates[regionId];
@@ -1126,9 +1153,9 @@ const renderHistoryList = (data: HistoryResponse) => {
             ? stats.total_count_min
             : Math.min(aggregate.min, stats.total_count_min!);
       }
-      if (Number.isFinite(stats.crowd_index_avg)) {
-        aggregate.crowdSum += stats.crowd_index_avg!;
-        aggregate.crowdCount += 1;
+      if (Number.isFinite(stats.total_density_avg)) {
+        aggregate.densitySum += stats.total_density_avg!;
+        aggregate.densityCount += 1;
       }
     });
   });
@@ -1174,14 +1201,14 @@ const renderHistoryList = (data: HistoryResponse) => {
         regionNameMap.get(regionId) || state.historyRegionName || regionId;
       label.textContent = regionName;
       const avg = stats.countCount ? stats.countSum / stats.countCount : undefined;
-      const crowdIndex =
-        stats.crowdCount && stats.crowdCount > 0 ? stats.crowdSum / stats.crowdCount : undefined;
-      const crowdText = Number.isFinite(crowdIndex)
-        ? ` / 拥挤指数 ${formatNumber(crowdIndex, 2)}`
+      const densityAvg =
+        stats.densityCount && stats.densityCount > 0 ? stats.densitySum / stats.densityCount : undefined;
+      const densityText = Number.isFinite(densityAvg)
+        ? ` / 密度 ${formatNumber(densityAvg, 2)}`
         : "";
       text.textContent = `均值 ${formatCount(avg)} / 峰值 ${formatCount(
         stats.max
-      )} / 最低 ${formatCount(stats.min)}${crowdText}`;
+      )} / 最低 ${formatCount(stats.min)}${densityText}`;
       row.appendChild(label);
       row.appendChild(text);
       ui.historyList.appendChild(row);
@@ -1432,34 +1459,101 @@ const promptRegionConfig = (existing?: RegionItem) => {
   }
 };
 
+// 停止分析任务
+const stopAnalysis = async (): Promise<boolean> => {
+  if (!state.sourceId || !state.isAnalysisRunning) return false;
+  try {
+    state.isAnalysisRunning = false;
+    await apiPost(`/analysis/stop`, { source_id: state.sourceId });
+    closeSocket(state.realtimeSocket);
+    closeSocket(state.alertSocket);
+    clearRealtimeReconnect();
+    clearAlertReconnect();
+    setAnalysisStatus("stopped");
+    stopStatusPolling();
+    return true;
+  } catch (error) {
+    console.error("停止分析失败", error);
+    return false;
+  }
+};
+
+// 开始分析任务
+const startAnalysis = async (): Promise<boolean> => {
+  if (!state.sourceId) return false;
+  try {
+    await apiPost(`/analysis/start`, { source_id: state.sourceId });
+    state.isAnalysisRunning = true;
+    connectRealtime(state.sourceId);
+    connectAlerts(state.sourceId);
+    setAnalysisStatus("running");
+    startStatusPolling();
+    return true;
+  } catch (error) {
+    state.isAnalysisRunning = false;
+    console.error("开始分析失败", error);
+    return false;
+  }
+};
+
+// 如果分析正在运行，重启分析任务（用于区域变更后生效）
+const restartAnalysisIfRunning = async (): Promise<void> => {
+  if (!state.isAnalysisRunning) return;
+  await stopAnalysis();
+  // 短暂延迟确保后端已完全停止
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  await startAnalysis();
+};
+
 const createRegion = async () => {
   if (!state.sourceId) return;
   const config = promptRegionConfig();
   if (!config) return;
+  const wasRunning = state.isAnalysisRunning;
+  if (wasRunning) {
+    await stopAnalysis();
+  }
   await apiPost(`/regions`, {
     source_id: state.sourceId,
     ...config,
   });
   await loadRegions();
+  if (wasRunning) {
+    await startAnalysis();
+  }
 };
 
 const updateRegion = async (regionId: string) => {
   const existing = state.regionConfigs.find((item) => item.region_id === regionId);
   const config = promptRegionConfig(existing);
   if (!config) return;
+  const wasRunning = state.isAnalysisRunning;
+  if (wasRunning) {
+    await stopAnalysis();
+  }
   await apiRequest(`/regions/${encodeURIComponent(regionId)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(config),
   });
   await loadRegions();
+  if (wasRunning) {
+    await startAnalysis();
+  }
 };
 
 const deleteRegion = async (regionId: string) => {
   const confirmed = window.confirm("确定删除该区域？");
   if (!confirmed) return;
+  const wasRunning = state.isAnalysisRunning;
+  if (wasRunning) {
+    await stopAnalysis();
+  }
   await apiRequest(`/regions/${encodeURIComponent(regionId)}`, { method: "DELETE" });
   await loadRegions();
+  if (wasRunning) {
+    await startAnalysis();
+  }
 };
 
 const applyRegionTemplate = async () => {
@@ -1476,11 +1570,17 @@ const applyRegionTemplate = async () => {
   if (hasExisting) {
     const confirmed = window.confirm("将覆盖当前区域配置，是否继续？");
     if (!confirmed) return;
-    for (const region of state.regionConfigs) {
-      if (!region.region_id) continue;
-      await apiRequest(`/regions/${encodeURIComponent(region.region_id)}`, { method: "DELETE" });
-    }
   }
+  const wasRunning = state.isAnalysisRunning;
+  if (wasRunning) {
+    await stopAnalysis();
+  }
+  // 删除现有区域
+  for (const region of state.regionConfigs) {
+    if (!region.region_id) continue;
+    await apiRequest(`/regions/${encodeURIComponent(region.region_id)}`, { method: "DELETE" });
+  }
+  // 创建新区域
   for (const region of template.regions) {
     await apiPost(`/regions`, {
       source_id: state.sourceId,
@@ -1490,6 +1590,9 @@ const applyRegionTemplate = async () => {
     });
   }
   await loadRegions();
+  if (wasRunning) {
+    await startAnalysis();
+  }
 };
 
 const setSource = (sourceId: string, name?: string) => {

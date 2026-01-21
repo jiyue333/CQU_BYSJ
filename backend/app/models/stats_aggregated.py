@@ -20,12 +20,12 @@ if TYPE_CHECKING:
 class RegionStatsData:
     """区域统计数据结构"""
 
-    def __init__(self, name: str, avg: float, max: int, min: int, crowd_index: float):
+    def __init__(self, name: str, avg: float, max: int, min: int, density_avg: float = 0.0):
         self.name = name
         self.avg = avg
         self.max = max
         self.min = min
-        self.crowd_index = crowd_index
+        self.density_avg = density_avg
 
     def to_dict(self) -> dict:
         return {
@@ -33,7 +33,7 @@ class RegionStatsData:
             "avg": self.avg,
             "max": self.max,
             "min": self.min,
-            "crowd_index": self.crowd_index,
+            "density_avg": self.density_avg,
         }
 
     @classmethod
@@ -43,7 +43,7 @@ class RegionStatsData:
             avg=float(data.get("avg", 0)),
             max=int(data.get("max", 0)),
             min=int(data.get("min", 0)),
-            crowd_index=float(data.get("crowd_index", 0)),
+            density_avg=float(data.get("density_avg", 0)),
         )
 
 
@@ -73,14 +73,14 @@ class StatsAggregated(Base):
     total_density_avg: Mapped[float] = mapped_column(Float, nullable=False, comment="平均密度")
 
     # 区域统计（JSON）
-    # 格式: {"region_id": {"name": "前区", "avg": 50, "max": 65, "min": 40, "crowd_index": 0.8}}
+    # 格式: {"region_id": {"name": "前区", "avg": 50, "max": 65, "min": 40, "density_avg": 1.5}}
     region_stats: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True, comment="JSON 各区域统计"
     )
 
-    # 其他指标
+    # 其他指标（crowd_index_avg 已弃用，保留列以兼容旧数据）
     crowd_index_avg: Mapped[Optional[float]] = mapped_column(
-        Float, nullable=True, comment="平均拥挤指数"
+        Float, nullable=True, comment="[已弃用] 平均拥挤指数，请使用 total_density_avg"
     )
     sample_count: Mapped[int] = mapped_column(Integer, nullable=False, comment="采样点数量")
 
@@ -117,11 +117,11 @@ class StatsAggregated(Base):
             ensure_ascii=False
         )
 
-    def get_region_crowd_index(self, region_id: str) -> Optional[float]:
-        """获取指定区域的拥挤指数"""
+    def get_region_density_avg(self, region_id: str) -> Optional[float]:
+        """获取指定区域的平均密度"""
         region_data = self.get_region_stats_dict()
         if region_id in region_data:
-            return region_data[region_id].crowd_index
+            return region_data[region_id].density_avg
         return None
 
     def get_region_by_name(self, region_name: str) -> Optional[tuple[str, RegionStatsData]]:

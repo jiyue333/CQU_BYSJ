@@ -60,7 +60,6 @@ class StatsRepository:
         total_count_min: int,
         total_density_avg: float,
         region_stats: dict[str, dict],
-        crowd_index_avg: float,
         sample_count: int,
     ) -> StatsAggregated:
         """创建包含区域统计的记录"""
@@ -73,7 +72,6 @@ class StatsRepository:
             total_count_min=total_count_min,
             total_density_avg=total_density_avg,
             region_stats=json.dumps(region_stats, ensure_ascii=False),
-            crowd_index_avg=crowd_index_avg,
             sample_count=sample_count,
         )
         return self.create(stat)
@@ -148,7 +146,7 @@ class StatsRepository:
             region_id: 区域 ID
 
         Returns:
-            [{"time": "2024-01-01T10:00:00Z", "name": "前区", "avg": 50, "max": 65, "min": 40, "crowd_index": 0.8}, ...]
+            [{"time": "2024-01-01T10:00:00Z", "name": "前区", "avg": 50, "max": 65, "min": 40, "density_avg": 1.5}, ...]
         """
         stats = self.get_by_time_range(source_id, interval_type, time_from, time_to)
         result = []
@@ -162,7 +160,7 @@ class StatsRepository:
                     "avg": r.avg,
                     "max": r.max,
                     "min": r.min,
-                    "crowd_index": r.crowd_index,
+                    "density_avg": r.density_avg,
                 })
         return result
 
@@ -195,7 +193,6 @@ class StatsRepository:
             existing.total_count_min = stat.total_count_min
             existing.total_density_avg = stat.total_density_avg
             existing.region_stats = stat.region_stats
-            existing.crowd_index_avg = stat.crowd_index_avg
             existing.sample_count = stat.sample_count
             self.db.commit()
             self.db.refresh(existing)

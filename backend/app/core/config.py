@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     ALERT_TOTAL_CRITICAL: int = 100
     ALERT_COOLDOWN_SECONDS: int = 30
 
+    # 密度计算配置
+    # 密度 = 人数 × DENSITY_FACTOR / 面积（像素²）
+    # 默认 10000，使得 100 人 / 10000 像素² ≈ 1.0
+    DENSITY_FACTOR: float = 10000.0
+    DENSITY_MAX: float = 100.0  # 密度上限
+
     def get_database_url(self) -> str:
         """获取数据库 URL"""
         if self.DATABASE_URL:

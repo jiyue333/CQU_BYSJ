@@ -27,7 +27,6 @@ class RegionHistoryStats(BaseModel):
     total_count_max: int = Field(..., description="最大人数")
     total_count_min: int = Field(..., description="最小人数")
     total_density_avg: float = Field(..., description="平均密度")
-    crowd_index_avg: float = Field(..., description="平均拥挤指数")
 
 
 class HistorySeriesItem(BaseModel):
@@ -38,7 +37,6 @@ class HistorySeriesItem(BaseModel):
     total_count_max: int = Field(..., description="最大人数")
     total_count_min: int = Field(..., description="最小人数")
     total_density_avg: float = Field(..., description="平均密度")
-    crowd_index_avg: Optional[float] = Field(default=None, description="平均拥挤指数")
     regions: dict[str, RegionHistoryStats] = Field(default_factory=dict, description="各区域统计")
 
 

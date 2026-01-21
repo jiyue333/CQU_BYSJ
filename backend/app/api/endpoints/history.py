@@ -64,8 +64,7 @@ async def get_history(
                 total_count_avg=r.avg,
                 total_count_max=r.max,
                 total_count_min=r.min,
-                total_density_avg=0.0,  # 区域密度暂不存储
-                crowd_index_avg=r.crowd_index,
+                total_density_avg=r.density_avg,
             )
 
         series.append(
@@ -75,7 +74,6 @@ async def get_history(
                 total_count_max=s.total_count_max,
                 total_count_min=s.total_count_min,
                 total_density_avg=s.total_density_avg,
-                crowd_index_avg=s.crowd_index_avg,
                 regions=regions_data,
             )
         )

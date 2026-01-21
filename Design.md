@@ -141,17 +141,15 @@
     "ts": "2025-01-19T10:00:00.123Z",
     "frame": "base64...",
     "total_count": 150,
-    "total_density": 0.005,
+    "total_density": 1.5,
     "regions": [
       "regionid": {
         "total_count_avg": 50,
         "total_count_max": 65,
         "total_count_min": 40,
-        "total_density_avg": 0.004,
-        "crowd_index_avg": 0.8
-      }    
+        "total_density_avg": 1.2
+      }
     ],
-    "crowd_index": 0.75,
     "entry_speed": 12
   }
   ```
@@ -320,15 +318,13 @@
         "total_count_avg": 120,
         "total_count_max": 140,
         "total_count_min": 98,
-        "total_density_avg": 0.005,
-        "crowd_index_avg": 0.72,
+        "total_density_avg": 1.8,
         "regions": {
           "regionid": {
             "total_count_avg": 50,
             "total_count_max": 65,
             "total_count_min": 40,
-            "total_density_avg": 0.004,
-            "crowd_index_avg": 0.8
+            "total_density_avg": 1.5
           }
         }
       }
@@ -473,9 +469,9 @@ erDiagram
         REAL total_count_avg "平均人数"
         INTEGER total_count_max "最大人数"
         INTEGER total_count_min "最小人数"
-        REAL total_density_avg "平均密度"
+        REAL total_density_avg "平均密度(0-100)"
         TEXT region_stats "JSON 区域统计"
-        REAL crowd_index_avg "平均拥挤指数"
+        REAL crowd_index_avg "[已弃用]"
         INTEGER sample_count "采样点数"
         TEXT created_at "创建时间"
     }
@@ -640,9 +636,9 @@ erDiagram
 | total_count_avg | REAL | NOT NULL | 平均人数 |
 | total_count_max | INTEGER | NOT NULL | 最大人数 |
 | total_count_min | INTEGER | NOT NULL | 最小人数 |
-| total_density_avg | REAL | NOT NULL | 平均密度 |
-| region_stats | TEXT | NULL | JSON 各区域统计 `{"region_id": {"name": "前区", "avg": 50, "max": 65, "min": 40, "crowd_index": "0.8"}}` |
-| crowd_index_avg | REAL | NULL | 平均拥挤指数 |
+| total_density_avg | REAL | NOT NULL | 平均密度（0-100 区间） |
+| region_stats | TEXT | NULL | JSON 各区域统计 `{"region_id": {"name": "前区", "avg": 50, "max": 65, "min": 40, "density_avg": 1.5}}` |
+| crowd_index_avg | REAL | NULL | [已弃用] 平均拥挤指数，请使用 total_density_avg |
 | sample_count | INTEGER | NOT NULL | 采样点数量 |
 | created_at | TEXT | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 记录创建时间 |
 

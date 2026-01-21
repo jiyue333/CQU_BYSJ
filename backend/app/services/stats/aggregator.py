@@ -27,7 +27,6 @@ class RegionFrameStats:
     name: str
     count: int
     density: float
-    crowd_index: float
 
 
 @dataclass
@@ -37,7 +36,6 @@ class FrameStats:
     timestamp: str  # ISO8601
     total_count: int
     total_density: float
-    crowd_index: float
     regions: list[RegionFrameStats] = field(default_factory=list)
 
 
@@ -60,14 +58,12 @@ class AggregatedBucket:
 
         total_counts = [s.total_count for s in self.samples]
         total_densities = [s.total_density for s in self.samples]
-        crowd_indices = [s.crowd_index for s in self.samples]
 
         # 聚合区域数据
         region_data: dict[str, dict] = defaultdict(lambda: {
             "name": "",
             "counts": [],
             "densities": [],
-            "crowd_indices": [],
         })
 
         for sample in self.samples:
@@ -75,19 +71,18 @@ class AggregatedBucket:
                 region_data[r.region_id]["name"] = r.name
                 region_data[r.region_id]["counts"].append(r.count)
                 region_data[r.region_id]["densities"].append(r.density)
-                region_data[r.region_id]["crowd_indices"].append(r.crowd_index)
 
         # 计算区域聚合
         region_stats = {}
         for region_id, data in region_data.items():
             counts = data["counts"]
-            crowd_indices_r = data["crowd_indices"]
+            densities = data["densities"]
             region_stats[region_id] = {
                 "name": data["name"],
                 "avg": sum(counts) / len(counts) if counts else 0,
                 "max": max(counts) if counts else 0,
                 "min": min(counts) if counts else 0,
-                "crowd_index": sum(crowd_indices_r) / len(crowd_indices_r) if crowd_indices_r else 0,
+                "density_avg": sum(densities) / len(densities) if densities else 0,
             }
 
         return {
@@ -95,7 +90,6 @@ class AggregatedBucket:
             "total_count_max": max(total_counts),
             "total_count_min": min(total_counts),
             "total_density_avg": sum(total_densities) / len(total_densities),
-            "crowd_index_avg": sum(crowd_indices) / len(crowd_indices),
             "region_stats": region_stats,
             "sample_count": self.sample_count,
         }
@@ -195,7 +189,6 @@ class StatsAggregator:
                     total_count_max=aggregated["total_count_max"],
                     total_count_min=aggregated["total_count_min"],
                     total_density_avg=aggregated["total_density_avg"],
-                    crowd_index_avg=aggregated["crowd_index_avg"],
                     region_stats=json.dumps(aggregated["region_stats"], ensure_ascii=False),
                     sample_count=aggregated["sample_count"],
                 )
@@ -324,7 +317,6 @@ def rollup_stats(db: Session, source_id: Optional[str] = None) -> int:
                 total_maxes = [s.total_count_max for s in bucket_stats]
                 total_mins = [s.total_count_min for s in bucket_stats]
                 total_densities = [s.total_density_avg for s in bucket_stats]
-                crowd_indices = [s.crowd_index_avg for s in bucket_stats if s.crowd_index_avg is not None]
                 sample_counts = [s.sample_count for s in bucket_stats]
 
                 # 合并区域统计
@@ -333,7 +325,7 @@ def rollup_stats(db: Session, source_id: Optional[str] = None) -> int:
                     "avgs": [],
                     "maxes": [],
                     "mins": [],
-                    "crowd_indices": [],
+                    "densities": [],
                 })
                 for s in bucket_stats:
                     region_dict = s.get_region_stats_dict()
@@ -342,7 +334,7 @@ def rollup_stats(db: Session, source_id: Optional[str] = None) -> int:
                         merged_regions[region_id]["avgs"].append(r.avg)
                         merged_regions[region_id]["maxes"].append(r.max)
                         merged_regions[region_id]["mins"].append(r.min)
-                        merged_regions[region_id]["crowd_indices"].append(r.crowd_index)
+                        merged_regions[region_id]["densities"].append(r.density_avg)
 
                 region_stats = {}
                 for region_id, data in merged_regions.items():
@@ -351,7 +343,7 @@ def rollup_stats(db: Session, source_id: Optional[str] = None) -> int:
                         "avg": sum(data["avgs"]) / len(data["avgs"]) if data["avgs"] else 0,
                         "max": max(data["maxes"]) if data["maxes"] else 0,
                         "min": min(data["mins"]) if data["mins"] else 0,
-                        "crowd_index": sum(data["crowd_indices"]) / len(data["crowd_indices"]) if data["crowd_indices"] else 0,
+                        "density_avg": sum(data["densities"]) / len(data["densities"]) if data["densities"] else 0,
                     }
 
                 stat = StatsAggregated(
@@ -362,7 +354,6 @@ def rollup_stats(db: Session, source_id: Optional[str] = None) -> int:
                     total_count_max=max(total_maxes),
                     total_count_min=min(total_mins),
                     total_density_avg=sum(total_densities) / len(total_densities),
-                    crowd_index_avg=sum(crowd_indices) / len(crowd_indices) if crowd_indices else None,
                     region_stats=json.dumps(region_stats, ensure_ascii=False),
                     sample_count=sum(sample_counts),
                 )
