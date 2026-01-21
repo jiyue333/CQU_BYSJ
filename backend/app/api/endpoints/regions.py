@@ -34,6 +34,10 @@ def _region_to_response(region: Region) -> RegionResponse:
         name=region.name,
         points=points,
         color=region.color,
+        count_warning=region.count_warning,
+        count_critical=region.count_critical,
+        density_warning=region.density_warning,
+        density_critical=region.density_critical,
     )
 
 
@@ -76,6 +80,10 @@ async def create_region(
         name=request.name,
         points=json.dumps(request.points),
         color=request.color,
+        count_warning=request.count_warning,
+        count_critical=request.count_critical,
+        density_warning=request.density_warning,
+        density_critical=request.density_critical,
     )
     region_repo.create(region)
     logger.info(f"区域已创建: {region.region_id}")
@@ -104,6 +112,15 @@ async def update_region(
         update_data["points"] = json.dumps(request.points)
     if request.color is not None:
         update_data["color"] = request.color
+    # 预警阈值更新（允许设置为 None 来清除）
+    if "count_warning" in request.model_fields_set:
+        update_data["count_warning"] = request.count_warning
+    if "count_critical" in request.model_fields_set:
+        update_data["count_critical"] = request.count_critical
+    if "density_warning" in request.model_fields_set:
+        update_data["density_warning"] = request.density_warning
+    if "density_critical" in request.model_fields_set:
+        update_data["density_critical"] = request.density_critical
 
     if update_data:
         region = region_repo.update(region, **update_data)

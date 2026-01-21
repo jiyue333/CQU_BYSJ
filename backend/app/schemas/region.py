@@ -16,6 +16,11 @@ class RegionCreate(BaseModel):
     name: str = Field(..., description="区域名称")
     points: list[list[float]] = Field(..., description="多边形顶点坐标 [[x1,y1], [x2,y2], ...]")
     color: str = Field(default="#FF5733", description="区域颜色 (Hex)")
+    # 预警阈值（可选）
+    count_warning: Optional[int] = Field(default=None, description="人数警告阈值")
+    count_critical: Optional[int] = Field(default=None, description="人数严重阈值")
+    density_warning: Optional[float] = Field(default=None, description="密度警告阈值")
+    density_critical: Optional[float] = Field(default=None, description="密度严重阈值")
 
 
 class RegionUpdate(BaseModel):
@@ -24,6 +29,11 @@ class RegionUpdate(BaseModel):
     name: Optional[str] = Field(default=None, description="区域名称")
     points: Optional[list[list[float]]] = Field(default=None, description="多边形顶点坐标")
     color: Optional[str] = Field(default=None, description="区域颜色")
+    # 预警阈值
+    count_warning: Optional[int] = Field(default=None, description="人数警告阈值")
+    count_critical: Optional[int] = Field(default=None, description="人数严重阈值")
+    density_warning: Optional[float] = Field(default=None, description="密度警告阈值")
+    density_critical: Optional[float] = Field(default=None, description="密度严重阈值")
 
 
 class RegionResponse(BaseModel):
@@ -34,6 +44,11 @@ class RegionResponse(BaseModel):
     name: str = Field(..., description="区域名称")
     points: list[list[float]] = Field(..., description="多边形顶点坐标")
     color: str = Field(..., description="区域颜色")
+    # 预警阈值
+    count_warning: Optional[int] = Field(default=None, description="人数警告阈值")
+    count_critical: Optional[int] = Field(default=None, description="人数严重阈值")
+    density_warning: Optional[float] = Field(default=None, description="密度警告阈值")
+    density_critical: Optional[float] = Field(default=None, description="密度严重阈值")
 
     model_config = {"from_attributes": True}
 

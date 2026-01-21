@@ -50,10 +50,9 @@ class Settings(BaseSettings):
     # WebSocket 配置
     WS_HEARTBEAT_INTERVAL: int = 30  # 秒
 
-    # 告警默认配置
-    ALERT_TOTAL_WARNING: int = 50
-    ALERT_TOTAL_CRITICAL: int = 100
-    ALERT_COOLDOWN_SECONDS: int = 30
+    # 告警配置
+    # 注意：告警阈值现在通过前端在每个区域（Region）中单独配置
+    ALERT_COOLDOWN_SECONDS: int = 30  # 同一区域告警冷却时间（秒）
 
     # 密度计算配置
     # 密度 = 人数 × DENSITY_FACTOR / 面积（像素²）

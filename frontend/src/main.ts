@@ -170,33 +170,23 @@ if (app) {
           <div class="panel-header">
             <div>
               <p class="panel-kicker">预警配置</p>
-              <h2>密度阈值</h2>
+              <h2>区域阈值</h2>
             </div>
             <div class="panel-actions">
-              <span class="badge warn">高风险模式</span>
               <button class="ghost-button" type="button" data-action="export-alerts">导出告警</button>
             </div>
           </div>
           <div class="alert-body">
-            <div class="threshold">
-              <label for="thresholdRange">当前阈值</label>
-              <div class="range-row">
-                <input id="thresholdRange" type="range" min="40" max="95" value="70" data-range-input />
-                <span data-range-value>70%</span>
-              </div>
+            <div class="region-threshold-list" data-region-threshold-list>
+              <div class="region-note">暂无区域配置</div>
             </div>
-          <div class="alert-feed" data-alert-list>
+            <div class="alert-section-divider">
+              <span>最近告警</span>
+            </div>
+            <div class="alert-feed" data-alert-list>
               <div>
-                <strong>10:27</strong>
-                <span>前区密度 0.82，建议疏导</span>
-              </div>
-              <div>
-                <strong>10:19</strong>
-                <span>后区密度回落至 0.41</span>
-              </div>
-              <div>
-                <strong>10:11</strong>
-                <span>系统检测到高峰人流波动</span>
+                <strong>--:--</strong>
+                <span>暂无预警</span>
               </div>
             </div>
           </div>
@@ -207,6 +197,61 @@ if (app) {
         <span>© 2024 FlowLens · 人流计数与密度分析系统</span>
         <span>模型：YOLOv8n · 模式：实时推理</span>
       </footer>
+    </div>
+
+    <!-- 区域配置弹窗 -->
+    <div class="modal-overlay" data-region-modal>
+      <div class="modal-container">
+        <div class="modal-header">
+          <h3 data-modal-title>区域配置</h3>
+          <button class="modal-close" type="button" data-action="close-modal">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="regionName">区域名称</label>
+            <input type="text" id="regionName" class="form-input" placeholder="如：前区、入口A" data-region-name />
+          </div>
+          <div class="form-group color-picker">
+            <label>区域颜色</label>
+            <input type="color" value="#3B8FF6" data-region-color />
+            <input type="text" class="form-input" value="#3B8FF6" data-region-color-text />
+          </div>
+          <div class="form-section">
+            <div class="form-section-title">人数阈值</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="countWarning">警告阈值</label>
+                <input type="number" id="countWarning" class="form-input" placeholder="可选" min="0" data-count-warning />
+                <small>触发黄色预警</small>
+              </div>
+              <div class="form-group">
+                <label for="countCritical">严重阈值</label>
+                <input type="number" id="countCritical" class="form-input" placeholder="可选" min="0" data-count-critical />
+                <small>触发红色预警</small>
+              </div>
+            </div>
+          </div>
+          <div class="form-section">
+            <div class="form-section-title">密度阈值</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="densityWarning">警告阈值</label>
+                <input type="number" id="densityWarning" class="form-input" placeholder="可选" min="0" max="100" step="0.1" data-density-warning />
+                <small>密度 0-100</small>
+              </div>
+              <div class="form-group">
+                <label for="densityCritical">严重阈值</label>
+                <input type="number" id="densityCritical" class="form-input" placeholder="可选" min="0" max="100" step="0.1" data-density-critical />
+                <small>密度 0-100</small>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="ghost-button" type="button" data-action="cancel-modal">取消</button>
+          <button class="primary" type="button" data-action="confirm-modal">确定</button>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -315,6 +360,10 @@ type RegionItem = {
   density?: number;
   points?: number[][];
   color?: string;
+  count_warning?: number | null;
+  count_critical?: number | null;
+  density_warning?: number | null;
+  density_critical?: number | null;
 };
 
 type SourceItem = {
@@ -322,6 +371,9 @@ type SourceItem = {
   name?: string;
   source_type?: string;
   status?: string;
+  video_width?: number;
+  video_height?: number;
+  video_fps?: number;
   created_at?: string;
 };
 
@@ -387,6 +439,7 @@ const ui = {
   historyExportFormat: document.querySelector<HTMLSelectElement>("[data-history-export-format]"),
   regionTemplateSelect: document.querySelector<HTMLSelectElement>("[data-region-template]"),
   videoFrame: document.querySelector<HTMLImageElement>("[data-video-frame]"),
+  videoFrameContainer: document.querySelector<HTMLElement>(".video-frame"),
   thresholdInput,
   thresholdValue,
   actionButtons: {
@@ -405,11 +458,25 @@ const ui = {
     applyRegionTemplate: document.querySelector<HTMLElement>("[data-action='apply-region-template']"),
     fullscreen: document.querySelector<HTMLElement>("[data-action='fullscreen']"),
   },
+  // 区域配置弹窗
+  regionModal: document.querySelector<HTMLElement>("[data-region-modal]"),
+  modalTitle: document.querySelector<HTMLElement>("[data-modal-title]"),
+  regionNameInput: document.querySelector<HTMLInputElement>("[data-region-name]"),
+  regionColorInput: document.querySelector<HTMLInputElement>("[data-region-color]"),
+  regionColorText: document.querySelector<HTMLInputElement>("[data-region-color-text]"),
+  countWarningInput: document.querySelector<HTMLInputElement>("[data-count-warning]"),
+  countCriticalInput: document.querySelector<HTMLInputElement>("[data-count-critical]"),
+  densityWarningInput: document.querySelector<HTMLInputElement>("[data-density-warning]"),
+  densityCriticalInput: document.querySelector<HTMLInputElement>("[data-density-critical]"),
+  regionThresholdList: document.querySelector<HTMLElement>("[data-region-threshold-list]"),
 };
 
 const state = {
   sourceId: null as string | null,
   sourceName: null as string | null,
+  videoWidth: null as number | null,
+  videoHeight: null as number | null,
+  sourcesCache: [] as SourceItem[],
   realtimeSocket: null as WebSocket | null,
   alertSocket: null as WebSocket | null,
   realtimeReconnectTimer: null as number | null,
@@ -430,6 +497,8 @@ const state = {
   historyChart: null as echarts.ECharts | null,
   historyData: null as HistoryResponse | null,
   historyRegions: [] as RegionItem[],
+  gridPickerActive: false,
+  gridPickerPoints: [] as Array<{ x: number; y: number }>,
 };
 
 const setText = (element: HTMLElement | null, value: string) => {
@@ -552,17 +621,7 @@ const scheduleRealtimeReconnect = (reason: string) => {
   }, delay);
 };
 
-const scheduleAlertReconnect = (reason: string) => {
-  if (!state.isAnalysisRunning || !state.sourceId) return;
-  if (state.alertReconnectTimer) return;
-  const delay = getRetryDelay(state.alertRetryCount);
-  console.warn(`[ws] alert reconnect in ${delay}ms (${reason})`);
-  state.alertReconnectTimer = window.setTimeout(() => {
-    state.alertReconnectTimer = null;
-    state.alertRetryCount += 1;
-    connectAlerts(state.sourceId!);
-  }, delay);
-};
+// 注意：告警通过 realtime WebSocket 推送，不再需要单独的 alert WebSocket
 
 const parseApiPayload = <T>(payload: unknown): T => {
   if (!payload || typeof payload !== "object") return payload as T;
@@ -615,6 +674,467 @@ const updateSourceInfo = (name: string | null) => {
   }
   if (ui.sourceMeta) {
     ui.sourceMeta.textContent = state.sourceId ? `ID ${state.sourceId.slice(0, 6)}` : "未选择";
+  }
+};
+
+// 更新视频容器的宽高比
+const updateVideoAspectRatio = () => {
+  if (!ui.videoFrameContainer) return;
+  if (state.videoWidth && state.videoHeight && state.videoWidth > 0 && state.videoHeight > 0) {
+    ui.videoFrameContainer.style.setProperty("--video-aspect-ratio", `${state.videoWidth} / ${state.videoHeight}`);
+  } else {
+    ui.videoFrameContainer.style.removeProperty("--video-aspect-ratio");
+  }
+};
+
+// 棋盘点选相关常量
+const GRID_COLS = 10;
+const GRID_ROWS = 10;
+
+// 创建棋盘点选覆盖层
+const createGridPickerOverlay = (): HTMLElement => {
+  const overlay = document.createElement("div");
+  overlay.className = "grid-picker-overlay";
+
+  // 创建网格点
+  for (let row = 0; row <= GRID_ROWS; row++) {
+    for (let col = 0; col <= GRID_COLS; col++) {
+      const point = document.createElement("div");
+      point.className = "grid-point";
+      point.style.left = `${(col / GRID_COLS) * 100}%`;
+      point.style.top = `${(row / GRID_ROWS) * 100}%`;
+      point.dataset.col = String(col);
+      point.dataset.row = String(row);
+      point.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const x = (col / GRID_COLS) * 100;
+        const y = (row / GRID_ROWS) * 100;
+        handleGridPointClick(x, y, point);
+      });
+      overlay.appendChild(point);
+    }
+  }
+
+  // 创建多边形 SVG 容器
+  const polygonSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  polygonSvg.classList.add("grid-polygon");
+  polygonSvg.setAttribute("width", "100%");
+  polygonSvg.setAttribute("height", "100%");
+  polygonSvg.style.position = "absolute";
+  polygonSvg.style.inset = "0";
+  polygonSvg.style.pointerEvents = "none";
+  overlay.appendChild(polygonSvg);
+
+  // 创建工具栏
+  const toolbar = document.createElement("div");
+  toolbar.className = "grid-picker-toolbar";
+
+  // 添加拖拽提示图标
+  const dragHint = document.createElement("span");
+  dragHint.className = "drag-hint";
+  dragHint.textContent = "⋮⋮";
+  dragHint.title = "拖拽移动";
+  toolbar.appendChild(dragHint);
+
+  // 拖拽状态
+  let isDragging = false;
+  let dragStartX = 0;
+  let dragStartY = 0;
+  let toolbarStartX = 0;
+  let toolbarStartY = 0;
+
+  const onMouseDown = (e: MouseEvent) => {
+    // 如果点击的是按钮，不启动拖拽
+    if ((e.target as HTMLElement).tagName === "BUTTON") return;
+
+    isDragging = true;
+    toolbar.classList.add("dragging");
+    dragStartX = e.clientX;
+    dragStartY = e.clientY;
+
+    const rect = toolbar.getBoundingClientRect();
+    const parentRect = overlay.getBoundingClientRect();
+    toolbarStartX = rect.left - parentRect.left;
+    toolbarStartY = rect.top - parentRect.top;
+
+    e.preventDefault();
+  };
+
+  const onMouseMove = (e: MouseEvent) => {
+    if (!isDragging) return;
+
+    const dx = e.clientX - dragStartX;
+    const dy = e.clientY - dragStartY;
+
+    const parentRect = overlay.getBoundingClientRect();
+    const toolbarRect = toolbar.getBoundingClientRect();
+
+    // 计算新位置（限制在父容器内）
+    let newX = toolbarStartX + dx;
+    let newY = toolbarStartY + dy;
+
+    // 边界限制
+    newX = Math.max(0, Math.min(newX, parentRect.width - toolbarRect.width));
+    newY = Math.max(0, Math.min(newY, parentRect.height - toolbarRect.height));
+
+    // 移除默认的居中 transform，使用绝对定位
+    toolbar.style.transform = "none";
+    toolbar.style.left = `${newX}px`;
+    toolbar.style.top = `${newY}px`;
+    toolbar.style.bottom = "auto";
+  };
+
+  const onMouseUp = () => {
+    if (isDragging) {
+      isDragging = false;
+      toolbar.classList.remove("dragging");
+    }
+  };
+
+  toolbar.addEventListener("mousedown", onMouseDown);
+  document.addEventListener("mousemove", onMouseMove);
+  document.addEventListener("mouseup", onMouseUp);
+
+  // 清理函数存储在 overlay 上，关闭时调用
+  (overlay as any)._cleanupDrag = () => {
+    document.removeEventListener("mousemove", onMouseMove);
+    document.removeEventListener("mouseup", onMouseUp);
+  };
+
+  const undoBtn = document.createElement("button");
+  undoBtn.type = "button";
+  undoBtn.className = "btn-undo";
+  undoBtn.textContent = "撤销";
+  undoBtn.addEventListener("click", () => {
+    if (state.gridPickerPoints.length > 0) {
+      state.gridPickerPoints.pop();
+      updateGridPickerVisual(overlay);
+    }
+  });
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
+  cancelBtn.className = "btn-cancel";
+  cancelBtn.textContent = "取消";
+  cancelBtn.addEventListener("click", () => {
+    closeGridPicker();
+  });
+
+  const confirmBtn = document.createElement("button");
+  confirmBtn.type = "button";
+  confirmBtn.className = "btn-confirm";
+  confirmBtn.textContent = "确认";
+  confirmBtn.addEventListener("click", async () => {
+    if (state.gridPickerPoints.length < 3) {
+      alert("请至少选择 3 个点来创建多边形区域");
+      return;
+    }
+    await confirmGridPickerRegion();
+  });
+
+  toolbar.appendChild(undoBtn);
+  toolbar.appendChild(cancelBtn);
+  toolbar.appendChild(confirmBtn);
+  overlay.appendChild(toolbar);
+
+  return overlay;
+};
+
+// 处理网格点点击
+const handleGridPointClick = (x: number, y: number, pointEl: HTMLElement) => {
+  // 检查是否已存在该点
+  const existingIndex = state.gridPickerPoints.findIndex(
+    (p) => Math.abs(p.x - x) < 0.1 && Math.abs(p.y - y) < 0.1
+  );
+
+  if (existingIndex >= 0) {
+    // 如果点击的是第一个点且有3个以上的点，则闭合多边形
+    if (existingIndex === 0 && state.gridPickerPoints.length >= 3) {
+      confirmGridPickerRegion();
+      return;
+    }
+    // 否则取消选择该点
+    state.gridPickerPoints.splice(existingIndex, 1);
+    pointEl.classList.remove("selected");
+  } else {
+    // 添加新点
+    state.gridPickerPoints.push({ x, y });
+    pointEl.classList.add("selected");
+  }
+
+  // 更新可视化
+  const overlay = ui.videoFrameContainer?.querySelector(".grid-picker-overlay");
+  if (overlay) {
+    updateGridPickerVisual(overlay as HTMLElement);
+  }
+};
+
+// 更新棋盘点选可视化
+const updateGridPickerVisual = (overlay: HTMLElement) => {
+  // 更新点的选中状态
+  overlay.querySelectorAll(".grid-point").forEach((point) => {
+    const col = parseInt(point.getAttribute("data-col") || "0", 10);
+    const row = parseInt(point.getAttribute("data-row") || "0", 10);
+    const x = (col / GRID_COLS) * 100;
+    const y = (row / GRID_ROWS) * 100;
+    const isSelected = state.gridPickerPoints.some(
+      (p) => Math.abs(p.x - x) < 0.1 && Math.abs(p.y - y) < 0.1
+    );
+    point.classList.toggle("selected", isSelected);
+  });
+
+  // 更新多边形（使用排序后的点，实时预览正确的多边形形状）
+  const svg = overlay.querySelector(".grid-polygon");
+  if (svg) {
+    svg.innerHTML = "";
+    if (state.gridPickerPoints.length >= 2) {
+      // 对点进行极坐标排序
+      const sortedPoints = getSortedPreviewPoints(state.gridPickerPoints);
+
+      const polyline = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+      const pointsStr = sortedPoints
+        .map((p) => `${p.x}%,${p.y}%`)
+        .join(" ");
+      polyline.setAttribute("points", pointsStr);
+      polyline.setAttribute("fill", "rgba(59, 143, 246, 0.2)");
+      polyline.setAttribute("stroke", "rgba(59, 143, 246, 0.8)");
+      polyline.setAttribute("stroke-width", "2");
+      svg.appendChild(polyline);
+    }
+  }
+};
+
+// 获取排序后的预览点（内联极坐标排序，避免函数定义顺序问题）
+const getSortedPreviewPoints = (
+  points: Array<{ x: number; y: number }>
+): Array<{ x: number; y: number }> => {
+  if (points.length < 3) return [...points];
+  const centerX = points.reduce((sum, p) => sum + p.x, 0) / points.length;
+  const centerY = points.reduce((sum, p) => sum + p.y, 0) / points.length;
+  return [...points].sort((a, b) => {
+    const angleA = Math.atan2(a.y - centerY, a.x - centerX);
+    const angleB = Math.atan2(b.y - centerY, b.x - centerX);
+    return angleA - angleB;
+  });
+};
+
+// 打开棋盘点选器
+const openGridPicker = () => {
+  if (!ui.videoFrameContainer) return;
+  if (state.gridPickerActive) return;
+
+  state.gridPickerActive = true;
+  state.gridPickerPoints = [];
+
+  const overlay = createGridPickerOverlay();
+  ui.videoFrameContainer.appendChild(overlay);
+};
+
+// 关闭棋盘点选器
+const closeGridPicker = () => {
+  if (!ui.videoFrameContainer) return;
+  state.gridPickerActive = false;
+  state.gridPickerPoints = [];
+  const overlay = ui.videoFrameContainer.querySelector(".grid-picker-overlay");
+  if (overlay) {
+    // 清理拖拽事件监听器
+    if ((overlay as any)._cleanupDrag) {
+      (overlay as any)._cleanupDrag();
+    }
+    overlay.remove();
+  }
+};
+
+// ==============================
+// 区域配置弹窗相关
+// ==============================
+
+interface RegionFormData {
+  name: string;
+  color: string;
+  count_warning: number | null;
+  count_critical: number | null;
+  density_warning: number | null;
+  density_critical: number | null;
+}
+
+// 弹窗回调
+let _modalResolve: ((data: RegionFormData | null) => void) | null = null;
+
+// 显示区域配置弹窗
+const showRegionModal = (
+  title: string,
+  initial?: Partial<RegionFormData>
+): Promise<RegionFormData | null> => {
+  return new Promise((resolve) => {
+    _modalResolve = resolve;
+
+    // 设置标题
+    if (ui.modalTitle) {
+      ui.modalTitle.textContent = title;
+    }
+
+    // 填充初始值
+    if (ui.regionNameInput) {
+      ui.regionNameInput.value = initial?.name || "";
+    }
+    if (ui.regionColorInput) {
+      ui.regionColorInput.value = initial?.color || "#3B8FF6";
+    }
+    if (ui.regionColorText) {
+      ui.regionColorText.value = initial?.color || "#3B8FF6";
+    }
+    if (ui.countWarningInput) {
+      ui.countWarningInput.value = initial?.count_warning != null ? String(initial.count_warning) : "";
+    }
+    if (ui.countCriticalInput) {
+      ui.countCriticalInput.value = initial?.count_critical != null ? String(initial.count_critical) : "";
+    }
+    if (ui.densityWarningInput) {
+      ui.densityWarningInput.value = initial?.density_warning != null ? String(initial.density_warning) : "";
+    }
+    if (ui.densityCriticalInput) {
+      ui.densityCriticalInput.value = initial?.density_critical != null ? String(initial.density_critical) : "";
+    }
+
+    // 显示弹窗
+    ui.regionModal?.classList.add("visible");
+
+    // 聚焦名称输入框
+    setTimeout(() => ui.regionNameInput?.focus(), 100);
+  });
+};
+
+// 隐藏区域配置弹窗
+const hideRegionModal = () => {
+  ui.regionModal?.classList.remove("visible");
+  if (_modalResolve) {
+    _modalResolve(null);
+    _modalResolve = null;
+  }
+};
+
+// 确认弹窗
+const confirmRegionModal = () => {
+  if (!_modalResolve) return;
+
+  const name = ui.regionNameInput?.value.trim() || "";
+  if (!name) {
+    alert("请输入区域名称");
+    ui.regionNameInput?.focus();
+    return;
+  }
+
+  const color = ui.regionColorInput?.value || "#3B8FF6";
+
+  const countWarningVal = ui.countWarningInput?.value.trim();
+  const countCriticalVal = ui.countCriticalInput?.value.trim();
+  const densityWarningVal = ui.densityWarningInput?.value.trim();
+  const densityCriticalVal = ui.densityCriticalInput?.value.trim();
+
+  const data: RegionFormData = {
+    name,
+    color,
+    count_warning: countWarningVal ? parseInt(countWarningVal, 10) : null,
+    count_critical: countCriticalVal ? parseInt(countCriticalVal, 10) : null,
+    density_warning: densityWarningVal ? parseFloat(densityWarningVal) : null,
+    density_critical: densityCriticalVal ? parseFloat(densityCriticalVal) : null,
+  };
+
+  ui.regionModal?.classList.remove("visible");
+  _modalResolve(data);
+  _modalResolve = null;
+};
+
+// 同步颜色选择器和文本框
+if (ui.regionColorInput && ui.regionColorText) {
+  ui.regionColorInput.addEventListener("input", () => {
+    if (ui.regionColorText) {
+      ui.regionColorText.value = ui.regionColorInput!.value;
+    }
+  });
+  ui.regionColorText.addEventListener("input", () => {
+    const val = ui.regionColorText!.value;
+    if (/^#[0-9A-Fa-f]{6}$/.test(val) && ui.regionColorInput) {
+      ui.regionColorInput.value = val;
+    }
+  });
+}
+
+// 弹窗按钮事件
+document.addEventListener("click", (e) => {
+  const target = e.target;
+  if (!(target instanceof HTMLElement)) return;
+
+  const action = target.dataset.action || target.closest("button")?.dataset.action;
+
+  if (action === "close-modal" || action === "cancel-modal") {
+    hideRegionModal();
+  } else if (action === "confirm-modal") {
+    confirmRegionModal();
+  }
+});
+
+// 点击遮罩层关闭弹窗
+ui.regionModal?.addEventListener("click", (e) => {
+  if (e.target === ui.regionModal) {
+    hideRegionModal();
+  }
+});
+
+// ESC 关闭弹窗
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && ui.regionModal?.classList.contains("visible")) {
+    hideRegionModal();
+  }
+});
+
+// 确认棋盘点选区域
+const confirmGridPickerRegion = async () => {
+  if (state.gridPickerPoints.length < 3) {
+    alert("请至少选择 3 个点来创建多边形区域");
+    return;
+  }
+
+  // 使用极坐标排序，确保点按顺时针顺序排列，避免自相交多边形
+  const sortedPoints = getSortedPreviewPoints(state.gridPickerPoints);
+
+  // 转换点为坐标数组
+  const points = sortedPoints.map((p) => [p.x, p.y]);
+
+  closeGridPicker();
+
+  // 显示区域配置弹窗
+  const formData = await showRegionModal("新增区域");
+  if (!formData) {
+    return;
+  }
+
+  if (!state.sourceId) return;
+
+  const wasRunning = state.isAnalysisRunning;
+  if (wasRunning) {
+    await stopAnalysis();
+  }
+
+  try {
+    await apiPost(`/regions`, {
+      source_id: state.sourceId,
+      name: formData.name,
+      color: formData.color,
+      points,
+      count_warning: formData.count_warning,
+      count_critical: formData.count_critical,
+      density_warning: formData.density_warning,
+      density_critical: formData.density_critical,
+    });
+    await loadRegions();
+  } catch (error) {
+    handleApiError(error);
+  }
+
+  if (wasRunning) {
+    await startAnalysis();
   }
 };
 
@@ -677,6 +1197,36 @@ const updateRegions = (regions: RegionItem[]) => {
       const labelEl = row.querySelector<HTMLElement>(".region-meta em");
       if (labelEl) {
         labelEl.textContent = getDensityLevel(densityValue);
+      }
+
+      // 检查是否需要添加/更新编辑按钮
+      const config = state.regionConfigs.find((item) => item.name === region.name);
+      const existingActions = row.querySelector<HTMLElement>(".region-actions");
+      if (config?.region_id && !existingActions) {
+        // 需要添加编辑按钮但还没有
+        const meta = row.querySelector<HTMLElement>(".region-meta");
+        if (meta) {
+          const actions = document.createElement("div");
+          actions.className = "region-actions";
+
+          const editButton = document.createElement("button");
+          editButton.type = "button";
+          editButton.className = "mini-button";
+          editButton.textContent = "编辑";
+          editButton.dataset.action = "edit-region";
+          editButton.dataset.regionId = config.region_id;
+          actions.appendChild(editButton);
+
+          const deleteButton = document.createElement("button");
+          deleteButton.type = "button";
+          deleteButton.className = "mini-button danger";
+          deleteButton.textContent = "删除";
+          deleteButton.dataset.action = "delete-region";
+          deleteButton.dataset.regionId = config.region_id;
+          actions.appendChild(deleteButton);
+
+          meta.appendChild(actions);
+        }
       }
     } else {
       // 创建新行
@@ -744,6 +1294,92 @@ const updateRegions = (regions: RegionItem[]) => {
         barFill.style.width = `${barWidthPercent}%`;
       });
     }
+  });
+};
+
+// 渲染区域阈值配置列表（在预警配置面板中）
+const renderRegionThresholds = () => {
+  if (!ui.regionThresholdList) return;
+  ui.regionThresholdList.innerHTML = "";
+
+  const regions = state.regionConfigs.filter((r) => r.region_id);
+
+  if (!regions.length) {
+    const empty = document.createElement("div");
+    empty.className = "region-note";
+    empty.textContent = "暂无区域配置";
+    ui.regionThresholdList.appendChild(empty);
+    return;
+  }
+
+  regions.forEach((region) => {
+    const item = document.createElement("div");
+    item.className = "region-threshold-item";
+
+    const info = document.createElement("div");
+    info.className = "region-threshold-info";
+
+    const name = document.createElement("div");
+    name.className = "region-threshold-name";
+
+    const colorDot = document.createElement("span");
+    colorDot.className = "color-dot";
+    colorDot.style.background = region.color || "#3B8FF6";
+
+    const nameText = document.createElement("span");
+    nameText.textContent = region.name || "区域";
+
+    name.appendChild(colorDot);
+    name.appendChild(nameText);
+
+    const values = document.createElement("div");
+    values.className = "region-threshold-values";
+
+    // 人数阈值
+    if (region.count_warning != null || region.count_critical != null) {
+      if (region.count_warning != null) {
+        const warn = document.createElement("span");
+        warn.innerHTML = `<span class="warn-icon">⚠</span>人数≥${region.count_warning}`;
+        values.appendChild(warn);
+      }
+      if (region.count_critical != null) {
+        const crit = document.createElement("span");
+        crit.innerHTML = `<span class="crit-icon">🔴</span>人数≥${region.count_critical}`;
+        values.appendChild(crit);
+      }
+    }
+
+    // 密度阈值
+    if (region.density_warning != null || region.density_critical != null) {
+      if (region.density_warning != null) {
+        const warn = document.createElement("span");
+        warn.innerHTML = `<span class="warn-icon">⚠</span>密度≥${region.density_warning}`;
+        values.appendChild(warn);
+      }
+      if (region.density_critical != null) {
+        const crit = document.createElement("span");
+        crit.innerHTML = `<span class="crit-icon">🔴</span>密度≥${region.density_critical}`;
+        values.appendChild(crit);
+      }
+    }
+
+    if (!values.childElementCount) {
+      values.innerHTML = "<span>未设置阈值</span>";
+    }
+
+    info.appendChild(name);
+    info.appendChild(values);
+
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "mini-button";
+    editBtn.textContent = "编辑";
+    editBtn.dataset.action = "edit-region";
+    editBtn.dataset.regionId = region.region_id;
+
+    item.appendChild(info);
+    item.appendChild(editBtn);
+    ui.regionThresholdList.appendChild(item);
   });
 };
 
@@ -902,47 +1538,7 @@ const connectRealtime = (sourceId: string) => {
   });
 };
 
-const connectAlerts = (sourceId: string) => {
-  clearAlertReconnect();
-  closeSocket(state.alertSocket);
-  state.alertItems = [];
-  updateAlertCount();
-  renderAlerts(state.alertItems);
-  const ws = new WebSocket(getWsUrl(`${WS_BASE}/alerts`, { source_id: sourceId }));
-  state.alertSocket = ws;
-
-  ws.addEventListener("message", (event) => {
-    try {
-      const payload = JSON.parse(event.data) as
-        | { type?: string; data?: AlertItem; items?: AlertItem[] }
-        | AlertItem;
-      if (payload && typeof payload === "object" && "type" in payload && payload.type === "alert") {
-        const item = payload.data;
-        if (item) {
-          state.alertItems = [item, ...state.alertItems].slice(0, 10);
-        }
-      } else if (Array.isArray(payload.items)) {
-        state.alertItems = payload.items;
-      } else if ("alert_id" in payload && payload.alert_id) {
-        state.alertItems = [payload as AlertItem, ...state.alertItems].slice(0, 10);
-      }
-      updateAlertCount();
-      renderAlerts(state.alertItems);
-    } catch (error) {
-      console.error("预警推送解析失败", error);
-    }
-  });
-  ws.addEventListener("error", () => {
-    if (state.alertSocket === ws) {
-      scheduleAlertReconnect("error");
-    }
-  });
-  ws.addEventListener("close", () => {
-    if (state.alertSocket === ws) {
-      scheduleAlertReconnect("close");
-    }
-  });
-};
+// connectAlerts 已移除 - 告警通过 realtime WebSocket 推送
 
 const ensureSourceSelected = () => {
   if (state.sourceId) return true;
@@ -965,7 +1561,9 @@ const handleApiError = (error: unknown) => {
 const loadSources = async () => {
   try {
     const data = await apiGet<{ sources?: SourceItem[] }>(`/sources`);
-    return data.sources || [];
+    const sources = data.sources || [];
+    state.sourcesCache = sources;
+    return sources;
   } catch (error) {
     console.error("数据源加载失败", error);
     return [];
@@ -1071,6 +1669,8 @@ const loadRegions = async () => {
         density: item.density ?? 0,
       }))
     );
+    // 同步更新预警配置面板的区域阈值列表
+    renderRegionThresholds();
   } catch (error) {
     console.error("区域配置加载失败", error);
   }
@@ -1485,7 +2085,8 @@ const startAnalysis = async (): Promise<boolean> => {
     await apiPost(`/analysis/start`, { source_id: state.sourceId });
     state.isAnalysisRunning = true;
     connectRealtime(state.sourceId);
-    connectAlerts(state.sourceId);
+    // 加载历史告警（告警通过 realtime WebSocket 推送，无需单独连接）
+    await loadRecentAlerts();
     setAnalysisStatus("running");
     startStatusPolling();
     return true;
@@ -1525,8 +2126,20 @@ const createRegion = async () => {
 
 const updateRegion = async (regionId: string) => {
   const existing = state.regionConfigs.find((item) => item.region_id === regionId);
-  const config = promptRegionConfig(existing);
-  if (!config) return;
+  if (!existing) return;
+
+  // 使用弹窗显示现有配置
+  const formData = await showRegionModal("编辑区域", {
+    name: existing.name,
+    color: existing.color,
+    count_warning: existing.count_warning,
+    count_critical: existing.count_critical,
+    density_warning: existing.density_warning,
+    density_critical: existing.density_critical,
+  });
+
+  if (!formData) return;
+
   const wasRunning = state.isAnalysisRunning;
   if (wasRunning) {
     await stopAnalysis();
@@ -1534,7 +2147,14 @@ const updateRegion = async (regionId: string) => {
   await apiRequest(`/regions/${encodeURIComponent(regionId)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(config),
+    body: JSON.stringify({
+      name: formData.name,
+      color: formData.color,
+      count_warning: formData.count_warning,
+      count_critical: formData.count_critical,
+      density_warning: formData.density_warning,
+      density_critical: formData.density_critical,
+    }),
   });
   await loadRegions();
   if (wasRunning) {
@@ -1595,10 +2215,13 @@ const applyRegionTemplate = async () => {
   }
 };
 
-const setSource = (sourceId: string, name?: string) => {
+const setSource = (sourceId: string, name?: string, width?: number, height?: number) => {
   state.sourceId = sourceId;
   state.sourceName = name || null;
+  state.videoWidth = width || null;
+  state.videoHeight = height || null;
   updateSourceInfo(name || null);
+  updateVideoAspectRatio();
   void loadRegions();
   void loadAnalysisStatus();
   void loadRecentAlerts();
@@ -1699,11 +2322,11 @@ if (ui.actionButtons.sourceCamera) {
     const url = window.prompt("请输入摄像头/推流地址", "rtsp://");
     if (!url) return;
     try {
-      const data = await apiPost<{ source_id: string; name?: string }>(`/sources/stream`, {
+      const data = await apiPost<SourceItem>(`/sources/stream`, {
         url,
         name: "摄像头",
       });
-      setSource(data.source_id, data.name || "摄像头");
+      setSource(data.source_id, data.name || "摄像头", data.video_width, data.video_height);
       await loadThreshold();
     } catch (error) {
       handleApiError(error);
@@ -1720,8 +2343,8 @@ if (ui.actionButtons.sourceUpload) {
       const file = input.files?.[0];
       if (!file) return;
       try {
-        const data = await apiUpload(file);
-        setSource(data.source_id, data.name || file.name);
+        const data = await apiUpload(file) as SourceItem;
+        setSource(data.source_id, data.name || file.name, data.video_width, data.video_height);
         await loadThreshold();
       } catch (error) {
         handleApiError(error);
@@ -1737,7 +2360,10 @@ if (ui.sourceSelect) {
     if (!selectedId) {
       state.sourceId = null;
       state.sourceName = null;
+      state.videoWidth = null;
+      state.videoHeight = null;
       updateSourceInfo(null);
+      updateVideoAspectRatio();
       closeSocket(state.realtimeSocket);
       closeSocket(state.alertSocket);
       clearRealtimeReconnect();
@@ -1747,8 +2373,10 @@ if (ui.sourceSelect) {
       stopStatusPolling();
       return;
     }
-    const name = ui.sourceSelect.selectedOptions[0]?.textContent?.trim();
-    setSource(selectedId, name || selectedId);
+    // 从缓存中查找完整的数据源信息
+    const source = state.sourcesCache.find((s) => s.source_id === selectedId);
+    const name = source?.name || ui.sourceSelect.selectedOptions[0]?.textContent?.trim() || selectedId;
+    setSource(selectedId, name, source?.video_width, source?.video_height);
   });
 }
 
@@ -1812,7 +2440,8 @@ if (ui.actionButtons.startAnalysis) {
       await apiPost(`/analysis/start`, { source_id: state.sourceId });
       state.isAnalysisRunning = true;
       connectRealtime(state.sourceId!);
-      connectAlerts(state.sourceId!);
+      // 加载历史告警（告警通过 realtime WebSocket 推送，无需单独连接）
+      await loadRecentAlerts();
       setAnalysisStatus("running");
       startStatusPolling();
     } catch (error) {
@@ -1914,11 +2543,8 @@ if (ui.actionButtons.customRegions) {
 if (ui.actionButtons.addRegion) {
   ui.actionButtons.addRegion.addEventListener("click", async () => {
     if (!ensureSourceSelected()) return;
-    try {
-      await createRegion();
-    } catch (error) {
-      handleApiError(error);
-    }
+    // 使用棋盘点选方式新增区域
+    openGridPicker();
   });
 }
 
@@ -1994,6 +2620,25 @@ if (ui.regionList) {
       }
       if (button.dataset.action === "delete-region") {
         await deleteRegion(regionId);
+      }
+    } catch (error) {
+      handleApiError(error);
+    }
+  });
+}
+
+// 预警配置面板区域阈值列表的编辑按钮事件
+if (ui.regionThresholdList) {
+  ui.regionThresholdList.addEventListener("click", async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const button = target.closest("button");
+    if (!button) return;
+    const regionId = button.dataset.regionId;
+    if (!regionId) return;
+    try {
+      if (button.dataset.action === "edit-region") {
+        await updateRegion(regionId);
       }
     } catch (error) {
       handleApiError(error);

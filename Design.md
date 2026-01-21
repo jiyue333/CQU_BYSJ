@@ -180,8 +180,8 @@
 |------|------|------|
 | GET | `/api/alerts/recent` | 获取最近五次预警 |
 | GET | `/api/alerts/export` | 导出告警记录 |
-| GET | `/api/alerts/threshold` | 获取当前阈值配置 |
-| POST | `/api/alerts/threshold` | 更新阈值配置 |
+
+> **注意**：告警阈值配置已从全局配置改为**区域级别配置**。每个区域可单独设置人数和密度阈值，通过区域 API（`PUT /api/regions/:region_id`）进行更新。
 
 #### GET /api/alerts/recent?source_id=...
 获取最近五次预警
@@ -202,42 +202,6 @@
       }
     ]
   }
-  ```
-
-#### GET /api/alerts/threshold?source_id=...
-获取当前阈值配置
-
-- **响应**：
-  ```json
-  {
-    "total_warning_threshold": 50,
-    "total_critical_threshold": 100,
-    "default_region_warning": 20,
-    "default_region_critical": 50,
-    "region_thresholds": {
-      "regionid" : {"name" :"前区", "warning": 20, "critical": 40 }
-    },
-    "cooldown_seconds": 30
-  }
-  ```
-
-#### POST /api/alerts/threshold
-更新阈值配置
-
-- **请求**：
-  ```json
-  {
-    "source_id": "uuid",
-    "total_warning_threshold": 60,
-    "total_critical_threshold": 120,
-    "region_thresholds": {
-       "regionid" : {"name" :"前区", "warning": 20, "critical": 40 }
-    }
-  }
-  ```
-- **响应**：
-  ```json
-  { "ok": true }
   ```
 
 #### GET /api/alerts/export?source_id=...&from=...&to=...&format=csv|xlsx
@@ -266,7 +230,16 @@
   ```json
   {
     "regions": [
-      { "region_id": "uuid", "name": "前区", "points": [[0,0], [100,0], [100,100], [0,100]], "color": "#FF5733" }
+      {
+        "region_id": "uuid",
+        "name": "前区",
+        "points": [[0,0], [100,0], [100,100], [0,100]],
+        "color": "#FF5733",
+        "count_warning": 20,
+        "count_critical": 50,
+        "density_warning": 5.0,
+        "density_critical": 8.0
+      }
     ]
   }
   ```
@@ -280,7 +253,31 @@
     "source_id": "uuid",
     "name": "前区",
     "points": [[0,0], [100,0], [100,100], [0,100]],
-    "color": "#FF5733"
+    "color": "#FF5733",
+    "count_warning": 20,
+    "count_critical": 50,
+    "density_warning": 5.0,
+    "density_critical": 8.0
+  }
+  ```
+- **响应**：
+  ```json
+  { "region_id": "uuid", "name": "前区" }
+  ```
+
+#### PUT /api/regions/:region_id
+更新区域（包括阈值配置）
+
+- **请求**：
+  ```json
+  {
+    "name": "前区",
+    "points": [[0,0], [100,0], [100,100], [0,100]],
+    "color": "#FF5733",
+    "count_warning": 25,
+    "count_critical": 60,
+    "density_warning": 6.0,
+    "density_critical": 9.0
   }
   ```
 - **响应**：
@@ -399,7 +396,6 @@
 ```mermaid
 erDiagram
     video_sources ||--o{ regions : "has"
-    video_sources ||--o| alert_configs : "has"
     video_sources ||--o{ alerts : "triggers"
     video_sources ||--o{ stats_aggregated : "aggregates"
     video_sources ||--o{ export_tasks : "exports"
@@ -428,20 +424,10 @@ erDiagram
         REAL area_pixels "区域面积"
         INTEGER display_order "显示顺序"
         INTEGER is_active "是否启用 0/1"
-        TEXT created_at "创建时间"
-        TEXT updated_at "更新时间"
-    }
-
-    alert_configs {
-        TEXT config_id PK "UUID 主键"
-        TEXT source_id FK "数据源ID (UNIQUE)"
-        INTEGER total_warning_threshold "总人数警告阈值"
-        INTEGER total_critical_threshold "总人数严重阈值"
-        INTEGER default_region_warning "默认区域警告"
-        INTEGER default_region_critical "默认区域严重"
-        TEXT region_thresholds "JSON 自定义区域阈值"
-        INTEGER cooldown_seconds "冷却时间"
-        INTEGER enabled "是否启用 0/1"
+        INTEGER count_warning "人数警告阈值"
+        INTEGER count_critical "人数严重阈值"
+        REAL density_warning "密度警告阈值"
+        REAL density_critical "密度严重阈值"
         TEXT created_at "创建时间"
         TEXT updated_at "更新时间"
     }
@@ -494,11 +480,12 @@ erDiagram
 
 **核心关系说明**：
 - `video_sources` 是核心实体，所有业务数据都通过 `source_id` 关联
-- `regions` 存储用户自定义的检测区域，与数据源绑定（1:N）
-- `alert_configs` 存储每个数据源的预警阈值配置（1:1）
+- `regions` 存储用户自定义的检测区域及其告警阈值配置，与数据源绑定（1:N）
 - `alerts` 记录历史告警（1:N）
 - `stats_aggregated` 存储按时间粒度聚合后的统计数据（1:N）
 - `export_tasks` 记录数据导出任务及其状态（1:N）
+
+> **告警阈值说明**：告警阈值配置已整合到 `regions` 表中，每个区域可单独配置人数和密度的警告/严重阈值。告警冷却时间通过环境变量 `ALERT_COOLDOWN_SECONDS` 配置（默认 30 秒）。
 
 > **SQLite 类型说明**：SQLite 使用动态类型，`TEXT`/`INTEGER`/`REAL` 为亲和类型。布尔值用 `INTEGER`（0/1）表示，日期时间用 `TEXT`（ISO 8601 格式）存储。
 
@@ -535,7 +522,7 @@ erDiagram
 
 ### 2. regions - 区域配置表
 
-存储用户自定义的检测区域（多边形）。
+存储用户自定义的检测区域（多边形）及其告警阈值配置。
 
 | 字段名 | 类型 | 约束 | 说明 |
 |--------|------|------|------|
@@ -547,6 +534,10 @@ erDiagram
 | area_pixels | REAL | NULL | 区域面积（像素²，可预计算） |
 | display_order | INTEGER | NOT NULL, DEFAULT 0 | 显示顺序 |
 | is_active | INTEGER | NOT NULL, DEFAULT 1 | 是否启用（0/1） |
+| count_warning | INTEGER | NULL | 人数警告阈值（超过此值触发警告） |
+| count_critical | INTEGER | NULL | 人数严重阈值（超过此值触发严重告警） |
+| density_warning | REAL | NULL | 密度警告阈值 |
+| density_critical | REAL | NULL | 密度严重阈值 |
 | created_at | TEXT | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 创建时间 |
 | updated_at | TEXT | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 更新时间 |
 
@@ -562,33 +553,7 @@ erDiagram
 
 ---
 
-### 3. alert_configs - 预警配置表
-
-存储每个数据源的预警阈值配置。
-
-| 字段名 | 类型 | 约束 | 说明 |
-|--------|------|------|------|
-| config_id | TEXT | PRIMARY KEY | UUID，配置唯一标识 |
-| source_id | TEXT | NOT NULL, UNIQUE, FOREIGN KEY | 关联的数据源 ID（一对一） |
-| total_warning_threshold | INTEGER | NOT NULL, DEFAULT 50 | 总人数警告阈值 |
-| total_critical_threshold | INTEGER | NOT NULL, DEFAULT 100 | 总人数严重阈值 |
-| default_region_warning | INTEGER | NOT NULL, DEFAULT 20 | 默认区域警告阈值 |
-| default_region_critical | INTEGER | NOT NULL, DEFAULT 50 | 默认区域严重阈值 |
-| region_thresholds | TEXT | NULL | JSON 自定义区域阈值 `{"区域名": {"warning": 20, "critical": 40}}` |
-| cooldown_seconds | INTEGER | NOT NULL, DEFAULT 30 | 告警冷却时间（秒） |
-| enabled | INTEGER | NOT NULL, DEFAULT 1 | 是否启用预警（0/1） |
-| created_at | TEXT | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 创建时间 |
-| updated_at | TEXT | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 更新时间 |
-
-**索引**：
-- `idx_alert_configs_source_id` ON (source_id) - 按数据源查询配置
-
-**外键**：
-- FOREIGN KEY (source_id) REFERENCES video_sources(source_id) ON DELETE CASCADE
-
----
-
-### 4. alerts - 告警记录表
+### 3. alerts - 告警记录表
 
 存储历史告警信息，用于查询和分析。
 
@@ -623,7 +588,7 @@ erDiagram
 
 ---
 
-### 5. stats_aggregated - 聚合统计表
+### 4. stats_aggregated - 聚合统计表
 
 存储按时间粒度聚合后的统计数据，用于历史趋势查询。
 
@@ -657,7 +622,7 @@ erDiagram
 
 ---
 
-### 6. export_tasks - 导出任务表
+### 5. export_tasks - 导出任务表
 
 记录数据导出请求及其状态。
 
@@ -698,7 +663,6 @@ erDiagram
 | video_sources | idx_sources_created_at | created_at DESC | 按时间排序 |
 | regions | idx_regions_source_id | source_id | 按数据源查询区域 |
 | regions | idx_regions_source_active | source_id, is_active | 查询启用区域 |
-| alert_configs | idx_alert_configs_source_id | source_id | 按数据源查询配置 |
 | alerts | idx_alerts_source_time | source_id, timestamp DESC | 历史告警查询 |
 | alerts | idx_alerts_level | level | 按级别过滤 |
 | stats_aggregated | idx_stats_source_interval_time | source_id, interval_type, time_bucket DESC | 历史趋势查询 |

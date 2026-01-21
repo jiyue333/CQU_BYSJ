@@ -37,6 +37,20 @@ class Region(Base):
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="显示顺序")
     is_active: Mapped[int] = mapped_column(Integer, nullable=False, default=1, comment="是否启用 0/1")
 
+    # 预警阈值配置
+    count_warning: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, comment="人数警告阈值"
+    )
+    count_critical: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, comment="人数严重阈值"
+    )
+    density_warning: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True, comment="密度警告阈值"
+    )
+    density_critical: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True, comment="密度严重阈值"
+    )
+
     # 时间戳
     created_at: Mapped[str] = mapped_column(
         String(30), nullable=False, default=lambda: datetime.utcnow().isoformat() + "Z"

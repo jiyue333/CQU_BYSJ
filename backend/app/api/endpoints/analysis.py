@@ -24,7 +24,6 @@ from app.models.alert import Alert as AlertModel
 from app.repositories import (
     VideoSourceRepository,
     RegionRepository,
-    AlertConfigRepository,
     AlertRepository,
 )
 from app.schemas.common import ApiResponse, OkResponse
@@ -36,7 +35,7 @@ from app.schemas.analysis import (
 )
 from app.services.video import VideoService
 from app.services.detection import YOLOService, DetectionResult
-from app.services.alert import AlertService, AlertConfig
+from app.services.alert import AlertService, RegionThresholdConfig
 from app.services.stats import stats_aggregator, FrameStats, RegionFrameStats
 from app.api.endpoints.websocket import ws_manager
 from app.schemas.websocket import RealtimeFrame, RegionRealtimeStats, AlertMessage
@@ -136,38 +135,16 @@ async def _inference_loop(source_id: str) -> None:
 
         logger.info(f"区域配置: {list(regions_dict.keys()) if regions_dict else '无'}")
 
-        # 4. 获取告警阈值配置
-        config_repo = AlertConfigRepository(db)
-        alert_config_db = config_repo.get_by_source_id(source_id)
-
-        # 构建告警服务配置
-        total_critical = settings.ALERT_TOTAL_CRITICAL
-        region_thresholds = {}
-
-        if alert_config_db:
-            total_critical = alert_config_db.total_critical_threshold or total_critical
-
-            alert_config = AlertConfig(
-                total_warning_threshold=alert_config_db.total_warning_threshold or settings.ALERT_TOTAL_WARNING,
-                total_critical_threshold=total_critical,
-                default_region_warning=alert_config_db.default_region_warning or 20,
-                default_region_critical=alert_config_db.default_region_critical or 50,
-                cooldown_seconds=alert_config_db.cooldown_seconds or settings.ALERT_COOLDOWN_SECONDS,
-            )
-
-            # 解析区域阈值
-            if alert_config_db.region_thresholds:
-                try:
-                    raw = json.loads(alert_config_db.region_thresholds) if isinstance(
-                        alert_config_db.region_thresholds, str
-                    ) else alert_config_db.region_thresholds
-                    for name, values in raw.items():
-                        alert_config.region_thresholds[name] = (values["warning"], values["critical"])
-                        region_thresholds[name] = values["critical"]
-                except (json.JSONDecodeError, KeyError) as e:
-                    logger.warning(f"区域阈值解析失败: {e}")
-        else:
-            alert_config = AlertConfig()
+        # 4. 构建区域阈值配置（从 Region 表读取）
+        region_threshold_configs = []
+        for region in regions:
+            region_threshold_configs.append(RegionThresholdConfig(
+                region_name=region.name,
+                count_warning=region.count_warning,
+                count_critical=region.count_critical,
+                density_warning=region.density_warning,
+                density_critical=region.density_critical,
+            ))
 
         # 5. 初始化服务
         yolo_service = YOLOService(
@@ -176,7 +153,8 @@ async def _inference_loop(source_id: str) -> None:
             conf=settings.YOLO_CONF_THRESHOLD,
             device=settings.YOLO_DEVICE,
         )
-        alert_service = AlertService(config=alert_config)
+        alert_service = AlertService(cooldown_seconds=settings.ALERT_COOLDOWN_SECONDS)
+        alert_service.set_region_thresholds(region_threshold_configs)
         alert_repo = AlertRepository(db)
 
         # 6. 推理循环

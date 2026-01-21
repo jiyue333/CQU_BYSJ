@@ -10,6 +10,7 @@ YOLO 检测服务
 
 import warnings
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -21,6 +22,7 @@ from ultralytics import solutions
 
 from app.utils import calculate_density, calculate_polygon_area
 from app.core.config import settings
+from app.core.logger import logger
 
 
 @dataclass
@@ -65,6 +67,14 @@ class YOLOService:
             colormap: 热力图 colormap
             region_line_thickness: 区域边框线条粗细
         """
+        # 调试：打印模型加载信息
+        logger.info(f"[YOLO] 初始化 YOLOService")
+        logger.info(f"[YOLO] model_path = {model_path}")
+        logger.info(f"[YOLO] model_path exists = {Path(model_path).exists()}")
+        logger.info(f"[YOLO] model_path absolute = {Path(model_path).absolute()}")
+        logger.info(f"[YOLO] conf = {conf}, device = {device}")
+        logger.info(f"[YOLO] regions = {list(regions.keys()) if regions else 'None'}")
+
         self.regions = regions or {}
         self.region_line_thickness = region_line_thickness
 
@@ -78,23 +88,36 @@ class YOLOService:
             "conf": conf,
             "device": device,
             "classes": [0],  # 只检测 person
-            "show": False,
+            "show": False,  # 后端无 GUI，必须为 False
             "verbose": False,  # 关闭控制台输出
             "show_in": False,  # 禁用进入计数显示
             "show_out": False,  # 禁用离开计数显示
+            "iou": 0.85  # 设置 IoU 阈值
         }
 
         # 热力图
-        self.heatmap = solutions.Heatmap(colormap=colormap, **common_args)
+        self.heatmap = solutions.Heatmap(
+            colormap=colormap,
+            show_labels=False,  # 禁用标签显示
+            show_conf=False,  # 禁用置信度显示
+            **common_args
+        )
 
         # 区域计数（如果有区域定义）
+        # 注意：RegionCounter 仅用于获取计数，不使用其绘制输出
         self.region_counter = None
         if regions:
-            self.region_counter = solutions.RegionCounter(region=regions, **common_args)
+            self.region_counter = solutions.RegionCounter(
+                region=regions,
+                line_width=0,  # 禁用边框绘制
+                show_labels=False,  # 禁用标签显示
+                show_conf=False,  # 禁用置信度显示
+                **common_args
+            )
 
     def _draw_regions(self, frame: np.ndarray, region_counts: dict[str, int]) -> np.ndarray:
         """
-        在帧上绘制区域边框和区域人数
+        在帧上绘制区域边框和区域人数（显示在区域右上角）
 
         Args:
             frame: 输入帧
@@ -112,30 +135,37 @@ class YOLOService:
             # 绘制区域边框（细线）
             cv2.polylines(result, [pts], isClosed=True, color=color, thickness=self.region_line_thickness)
 
-            # 计算区域中心位置
-            M = cv2.moments(pts)
-            if M["m00"] != 0:
-                cx = int(M["m10"] / M["m00"])
-                cy = int(M["m01"] / M["m00"])
-            else:
-                cx, cy = pts[0][0], pts[0][1]
+            # 找到区域右上角位置（x最大且y最小的点附近）
+            # 使用边界框的右上角
+            x_min, y_min = pts.min(axis=0)
+            x_max, y_max = pts.max(axis=0)
 
-            # 绘制区域名称和人数
+            # 右上角位置
+            label_x = x_max
+            label_y = y_min
+
+            # 绘制人数（使用纯数字，避免中文问号问题）
             count = region_counts.get(name, 0)
-            label = f"{name}: {count}"
+            label = str(count)
             font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.6
+            font_scale = 0.7
             thickness = 2
 
             # 获取文本大小
             (text_w, text_h), baseline = cv2.getTextSize(label, font, font_scale, thickness)
 
+            # 调整位置使标签在区域内右上角
+            padding = 6
+            box_x1 = label_x - text_w - padding * 2
+            box_y1 = label_y
+            box_x2 = label_x
+            box_y2 = label_y + text_h + padding * 2
+
             # 绘制背景矩形
-            padding = 4
             cv2.rectangle(
                 result,
-                (cx - text_w // 2 - padding, cy - text_h // 2 - padding),
-                (cx + text_w // 2 + padding, cy + text_h // 2 + padding),
+                (box_x1, box_y1),
+                (box_x2, box_y2),
                 color,
                 -1
             )
@@ -144,7 +174,7 @@ class YOLOService:
             cv2.putText(
                 result,
                 label,
-                (cx - text_w // 2, cy + text_h // 2),
+                (box_x1 + padding, box_y2 - padding),
                 font,
                 font_scale,
                 (255, 255, 255),
@@ -168,7 +198,7 @@ class YOLOService:
         result = frame.copy()
         h, w = result.shape[:2]
 
-        label = f"Total: {total_count}"
+        label = str(total_count)
         font = cv2.FONT_HERSHEY_SIMPLEX
         font_scale = 0.8
         thickness = 2
@@ -227,7 +257,8 @@ class YOLOService:
         region_densities = {}
 
         if self.region_counter:
-            region_result = self.region_counter(frame)
+            # 使用帧副本，避免 RegionCounter 修改原始帧或共享状态
+            region_result = self.region_counter(frame.copy())
             total_count = region_result.total_tracks
             region_counts = dict(region_result.region_counts) if region_result.region_counts else {}
 
@@ -247,9 +278,8 @@ class YOLOService:
             # 无区域时从热力图结果获取总人数
             if hasattr(heatmap_result, "total_tracks"):
                 total_count = heatmap_result.total_tracks
-
-        # 在右上角显示总人数
-        output_frame = self._draw_total_count(output_frame, total_count)
+            # 只在无区域时显示右上角总人数
+            output_frame = self._draw_total_count(output_frame, total_count)
 
         total_density = calculate_density(
             total_count, frame.shape[0] * frame.shape[1],

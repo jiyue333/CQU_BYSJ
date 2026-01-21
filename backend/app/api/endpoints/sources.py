@@ -82,9 +82,9 @@ async def upload_video(
     )
     repo.create(source)
 
-    # 插入默认“全部区域”配置
+    # 插入默认"全部区域"配置（使用百分比坐标 0-100）
     region_repo = RegionRepository(db)
-    points = [[0, 0], [video_width or 0, 0], [video_width or 0, video_height or 0], [0, video_height or 0]]
+    points = [[0, 0], [100, 0], [100, 100], [0, 100]]
     default_region = Region(
         region_id=str(uuid.uuid4()),
         source_id=source_id,
@@ -92,6 +92,11 @@ async def upload_video(
         points=json.dumps(points),
         color="#3B8FF6",
         display_order=0,
+        # 默认告警阈值
+        count_warning=50,
+        count_critical=100,
+        density_warning=5.0,
+        density_critical=8.0,
     )
     region_repo.create(default_region)
 
@@ -137,9 +142,9 @@ async def add_stream(
     )
     repo.create(source)
 
-    # 插入默认“全部区域”配置
+    # 插入默认"全部区域"配置（使用百分比坐标 0-100）
     region_repo = RegionRepository(db)
-    points = [[0, 0], [video_width or 0, 0], [video_width or 0, video_height or 0], [0, video_height or 0]]
+    points = [[0, 0], [100, 0], [100, 100], [0, 100]]
     default_region = Region(
         region_id=str(uuid.uuid4()),
         source_id=source_id,
@@ -147,6 +152,11 @@ async def add_stream(
         points=json.dumps(points),
         color="#3B8FF6",
         display_order=0,
+        # 默认告警阈值
+        count_warning=50,
+        count_critical=100,
+        density_warning=5.0,
+        density_critical=8.0,
     )
     region_repo.create(default_region)
 

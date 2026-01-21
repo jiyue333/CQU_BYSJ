@@ -32,6 +32,32 @@ from PIL import Image, ImageDraw
 from scipy.io import loadmat
 
 
+def get_adaptive_box_size(num_points: int) -> float:
+    """
+    根据画面中的人数动态计算 box 大小。
+    人数越多通常意味着拍摄距离越远，人越小，box 应该越小。
+
+    阈值规则：
+      0-50:    100px
+      51-100:   50px
+      101-150:  40px
+      151-250:  30px
+      251+:     20px
+    """
+    thresholds = [
+        (50, 200),
+        (100, 150),
+        (150, 130),
+        (300, 80),
+        (500, 40),
+        (1000, 20),
+    ]
+    for threshold, size in thresholds:
+        if num_points <= threshold:
+            return float(size)
+    return 15.0  # 超过 400 人使用最小 box
+
+
 def find_points_in_mat(mat: dict) -> np.ndarray:
     """
     Find an Nx2 float array in .mat.
@@ -184,12 +210,13 @@ def process_one(
     img_path: Path,
     mat_path: Path,
     out_dir: Path,
-    box_w: float,
-    box_h: float,
+    box_w: float | None,
+    box_h: float | None,
     class_id: int,
     coord_mode: str,
     scale_mode: str,
     save_vis: bool,
+    adaptive_box: bool,
 ) -> None:
     img = Image.open(img_path)
     w, h = img.size
@@ -197,8 +224,17 @@ def process_one(
     mat = loadmat(mat_path)
     pts = find_points_in_mat(mat)
 
+    # 根据人数自适应 box 大小
+    if adaptive_box:
+        adaptive_size = get_adaptive_box_size(len(pts))
+        actual_box_w = adaptive_size
+        actual_box_h = adaptive_size
+    else:
+        actual_box_w = box_w
+        actual_box_h = box_h
+
     pts_xy, used_orient, used_scale = transform_points(pts, w, h, coord_mode=coord_mode, scale_mode=scale_mode)
-    boxes = points_to_yolo_boxes(pts_xy, w, h, box_w=box_w, box_h=box_h, class_id=class_id)
+    boxes = points_to_yolo_boxes(pts_xy, w, h, box_w=actual_box_w, box_h=actual_box_h, class_id=class_id)
 
     out_images = out_dir / "images"
     out_labels = out_dir / "labels"
@@ -218,7 +254,7 @@ def process_one(
         vis_path = out_vis / (img_path.stem + "_yolo_vis.jpg")
         draw_boxes(img, boxes, vis_path)
 
-    print(f"[OK] {img_path.name}: points={len(pts)} boxes={len(boxes)} orient={used_orient} scale={used_scale}")
+    print(f"[OK] {img_path.name}: 人数={len(pts)} boxes={len(boxes)} box_size={actual_box_w:.0f}x{actual_box_h:.0f} orient={used_orient} scale={used_scale}")
 
 
 def main():
@@ -235,6 +271,8 @@ def main():
     ap.add_argument("--scale-mode", choices=["auto", "none", "max", "range"], default="auto",
                     help="Scale points if not matching image size.")
     ap.add_argument("--no-vis", action="store_true", help="Disable visualization.")
+    ap.add_argument("--adaptive-box", action="store_true",
+                    help="根据人数自适应调整 box 大小（忽略 --box-w/--box-h）。")
     args = ap.parse_args()
 
     img_in = Path(args.images)
@@ -272,6 +310,7 @@ def main():
             coord_mode=args.coord_mode,
             scale_mode=args.scale_mode,
             save_vis=not args.no_vis,
+            adaptive_box=args.adaptive_box,
         )
 
 

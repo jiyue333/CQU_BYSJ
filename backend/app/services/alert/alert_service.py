@@ -2,17 +2,17 @@
 告警服务
 
 提供：
-- 阈值判断（总人数/区域人数）
+- 区域人数/密度阈值判断
 - 告警级别（warning/critical）
 - 告警记录生成
 - 防抖/冷却机制
-- 告警配置管理
 """
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
+from typing import Optional
 
 from app.services.detection import DetectionResult
 
@@ -27,8 +27,8 @@ class AlertLevel(Enum):
 class AlertType(Enum):
     """告警类型"""
 
-    TOTAL_COUNT = "total_count"  # 总人数告警
     REGION_COUNT = "region_count"  # 区域人数告警
+    REGION_DENSITY = "region_density"  # 区域密度告警
 
 
 @dataclass
@@ -38,10 +38,10 @@ class Alert:
     alert_id: str
     alert_type: AlertType
     level: AlertLevel
-    current_value: int
-    threshold: int
+    current_value: float
+    threshold: float
     timestamp: datetime
-    region_name: str | None = None  # 区域告警时有值
+    region_name: str
 
     def to_dict(self) -> dict:
         """转换为字典（用于 JSON 序列化）"""
@@ -57,40 +57,34 @@ class Alert:
 
 
 @dataclass
-class AlertConfig:
-    """告警配置"""
+class RegionThresholdConfig:
+    """区域阈值配置"""
 
-    # 总人数阈值
-    total_warning_threshold: int = 50  # 警告阈值
-    total_critical_threshold: int = 100  # 严重阈值
-
-    # 区域人数阈值（可按区域单独配置）
-    region_thresholds: dict[str, tuple[int, int]] = field(default_factory=dict)
-    # {"区域名": (warning_threshold, critical_threshold)}
-
-    # 默认区域阈值（未单独配置的区域使用）
-    default_region_warning: int = 20
-    default_region_critical: int = 50
-
-    # 冷却时间（秒），同一类型告警在此时间内不重复触发
-    cooldown_seconds: int = 30
-
-    # 是否启用告警
-    enabled: bool = True
+    region_name: str
+    count_warning: Optional[int] = None
+    count_critical: Optional[int] = None
+    density_warning: Optional[float] = None
+    density_critical: Optional[float] = None
 
 
 class AlertService:
-    """告警服务"""
+    """告警服务 - 基于区域配置的阈值检查"""
 
-    def __init__(self, config: AlertConfig | None = None):
+    def __init__(self, cooldown_seconds: int = 30):
         """
         Args:
-            config: 告警配置，不传则使用默认配置
+            cooldown_seconds: 冷却时间（秒），同一区域告警在此时间内不重复触发
         """
-        self.config = config or AlertConfig()
+        self.cooldown_seconds = cooldown_seconds
+        # 区域阈值配置 {region_name: RegionThresholdConfig}
+        self._region_configs: dict[str, RegionThresholdConfig] = {}
         # 记录上次告警时间，用于冷却判断
-        # key: "total" 或 "region:{region_name}"
+        # key: "count:{region_name}" 或 "density:{region_name}"
         self._last_alert_time: dict[str, datetime] = {}
+
+    def set_region_thresholds(self, configs: list[RegionThresholdConfig]) -> None:
+        """设置区域阈值配置"""
+        self._region_configs = {c.region_name: c for c in configs}
 
     def check(self, result: DetectionResult) -> list[Alert]:
         """
@@ -102,69 +96,47 @@ class AlertService:
         Returns:
             触发的告警列表（可能为空）
         """
-        if not self.config.enabled:
-            return []
-
         alerts: list[Alert] = []
         now = datetime.now()
 
-        # 检查总人数
-        total_alert = self._check_total(result.total_count, now)
-        if total_alert:
-            alerts.append(total_alert)
-
-        # 检查各区域人数
+        # 检查各区域人数和密度
         for region_name, count in result.region_counts.items():
-            region_alert = self._check_region(region_name, count, now)
-            if region_alert:
-                alerts.append(region_alert)
+            density = result.region_densities.get(region_name, 0.0)
 
-        # TODO: 保存告警到数据库
-        # for alert in alerts:
-        #     db.save_alert(alert)
+            # 获取该区域的阈值配置
+            config = self._region_configs.get(region_name)
+            if not config:
+                continue
+
+            # 检查人数阈值
+            count_alert = self._check_count(region_name, count, config, now)
+            if count_alert:
+                alerts.append(count_alert)
+
+            # 检查密度阈值
+            density_alert = self._check_density(region_name, density, config, now)
+            if density_alert:
+                alerts.append(density_alert)
 
         return alerts
 
-    def _check_total(self, count: int, now: datetime) -> Alert | None:
-        """检查总人数告警"""
-        warning_th = self.config.total_warning_threshold
-        critical_th = self.config.total_critical_threshold
-
-        level = self._get_level(count, warning_th, critical_th)
-        if not level:
-            return None
-
-        # 冷却检查
-        if not self._check_cooldown("total", now):
-            return None
-
-        threshold = critical_th if level == AlertLevel.CRITICAL else warning_th
-        return Alert(
-            alert_id=str(uuid.uuid4()),
-            alert_type=AlertType.TOTAL_COUNT,
-            level=level,
-            current_value=count,
-            threshold=threshold,
-            timestamp=now,
-        )
-
-    def _check_region(
-        self, region_name: str, count: int, now: datetime
-    ) -> Alert | None:
+    def _check_count(
+        self, region_name: str, count: int, config: RegionThresholdConfig, now: datetime
+    ) -> Optional[Alert]:
         """检查区域人数告警"""
-        # 获取该区域的阈值配置
-        if region_name in self.config.region_thresholds:
-            warning_th, critical_th = self.config.region_thresholds[region_name]
-        else:
-            warning_th = self.config.default_region_warning
-            critical_th = self.config.default_region_critical
+        warning_th = config.count_warning
+        critical_th = config.count_critical
+
+        # 如果没有配置阈值，不检查
+        if warning_th is None and critical_th is None:
+            return None
 
         level = self._get_level(count, warning_th, critical_th)
         if not level:
             return None
 
         # 冷却检查
-        cooldown_key = f"region:{region_name}"
+        cooldown_key = f"count:{region_name}"
         if not self._check_cooldown(cooldown_key, now):
             return None
 
@@ -179,13 +151,44 @@ class AlertService:
             region_name=region_name,
         )
 
+    def _check_density(
+        self, region_name: str, density: float, config: RegionThresholdConfig, now: datetime
+    ) -> Optional[Alert]:
+        """检查区域密度告警"""
+        warning_th = config.density_warning
+        critical_th = config.density_critical
+
+        # 如果没有配置阈值，不检查
+        if warning_th is None and critical_th is None:
+            return None
+
+        level = self._get_level(density, warning_th, critical_th)
+        if not level:
+            return None
+
+        # 冷却检查
+        cooldown_key = f"density:{region_name}"
+        if not self._check_cooldown(cooldown_key, now):
+            return None
+
+        threshold = critical_th if level == AlertLevel.CRITICAL else warning_th
+        return Alert(
+            alert_id=str(uuid.uuid4()),
+            alert_type=AlertType.REGION_DENSITY,
+            level=level,
+            current_value=density,
+            threshold=threshold,
+            timestamp=now,
+            region_name=region_name,
+        )
+
     def _get_level(
-        self, count: int, warning_threshold: int, critical_threshold: int
-    ) -> AlertLevel | None:
+        self, value: float, warning_threshold: Optional[float], critical_threshold: Optional[float]
+    ) -> Optional[AlertLevel]:
         """根据当前值和阈值判断告警级别"""
-        if count >= critical_threshold:
+        if critical_threshold is not None and value >= critical_threshold:
             return AlertLevel.CRITICAL
-        elif count >= warning_threshold:
+        elif warning_threshold is not None and value >= warning_threshold:
             return AlertLevel.WARNING
         return None
 
@@ -198,7 +201,7 @@ class AlertService:
             False: 在冷却时间内，不触发
         """
         last_time = self._last_alert_time.get(key)
-        cooldown = timedelta(seconds=self.config.cooldown_seconds)
+        cooldown = timedelta(seconds=self.cooldown_seconds)
 
         if last_time and (now - last_time) < cooldown:
             return False
@@ -206,12 +209,6 @@ class AlertService:
         # 更新最后告警时间
         self._last_alert_time[key] = now
         return True
-
-    def update_config(self, **kwargs) -> None:
-        """更新配置"""
-        for key, value in kwargs.items():
-            if hasattr(self.config, key):
-                setattr(self.config, key, value)
 
     def reset_cooldown(self) -> None:
         """重置所有冷却时间"""
