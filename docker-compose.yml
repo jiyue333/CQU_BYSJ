@@ -1,8 +1,6 @@
 # Docker Compose 配置
 # CrowdFlow - 人流密度分析系统
 
-version: "3.8"
-
 services:
   # 后端服务
   backend:
@@ -33,6 +31,8 @@ services:
     build:
       context: .
       dockerfile: docker/frontend.Dockerfile
+      args:
+        VITE_API_URL: "http://localhost:${BACKEND_PORT:-8000}"
     container_name: crowdflow-frontend
     restart: unless-stopped
     ports:

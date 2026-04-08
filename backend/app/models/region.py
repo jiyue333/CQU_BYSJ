@@ -33,7 +33,8 @@ class Region(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False, comment="区域名称")
     points: Mapped[str] = mapped_column(Text, nullable=False, comment="JSON 多边形坐标")
     color: Mapped[str] = mapped_column(String(20), nullable=False, default="#FF5733", comment="显示颜色")
-    area_pixels: Mapped[Optional[float]] = mapped_column(Float, nullable=True, comment="区域面积")
+    area_pixels: Mapped[Optional[float]] = mapped_column(Float, nullable=True, comment="区域面积（像素²）")
+    area_physical: Mapped[Optional[float]] = mapped_column(Float, nullable=True, comment="区域物理面积（m²），由VLM估算")
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="显示顺序")
     is_active: Mapped[int] = mapped_column(Integer, nullable=False, default=1, comment="是否启用 0/1")
 

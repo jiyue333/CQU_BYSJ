@@ -3,20 +3,20 @@ FROM node:18-alpine AS builder
 
 WORKDIR /app
 
-# 安装 pnpm
-RUN npm install -g pnpm
+ARG VITE_API_URL=http://localhost:8000
+ENV VITE_API_URL=${VITE_API_URL}
 
 # 复制依赖文件
-COPY frontend/package.json frontend/pnpm-lock.yaml* ./
+COPY frontend/package.json frontend/package-lock.json ./
 
 # 安装依赖
-RUN pnpm install --frozen-lockfile || pnpm install
+RUN npm install
 
 # 复制源代码
 COPY frontend/ .
 
 # 构建（生产模式）
-RUN pnpm build
+RUN npm exec vite build
 
 # 生产镜像 - 使用轻量 HTTP 服务器
 FROM node:18-alpine

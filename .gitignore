@@ -145,3 +145,10 @@ temp/
 
 # 参考文件
 ref/*
+docs/*
+
+.playwright-cli
+.omx/
+.omc/
+.claude/
+downloads/

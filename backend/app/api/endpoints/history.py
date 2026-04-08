@@ -156,7 +156,7 @@ async def export_data(
     task = ExportTask(
         task_id=str(uuid.uuid4()),
         source_id=source_id,
-        export_type="stats",
+        export_type=format,
         status="completed",
         file_path=str(file_path),
     )

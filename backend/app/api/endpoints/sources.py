@@ -6,6 +6,7 @@
 
 import uuid
 import json
+import shutil
 from datetime import datetime
 from pathlib import Path
 
@@ -16,9 +17,10 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.logger import logger
-from app.models import VideoSource, Region
-from app.repositories import VideoSourceRepository, RegionRepository
+from app.models import VideoSource, Region, ExportTask
+from app.repositories import VideoSourceRepository, RegionRepository, ExportTaskRepository
 from app.schemas.common import ApiResponse
+from app.schemas.export import ExportResponse
 from app.schemas.video_source import (
     StreamCreate,
     VideoSourceResponse,
@@ -208,3 +210,50 @@ async def delete_source(
     logger.info(f"数据源已删除: {source_id}")
 
     return ApiResponse.success(msg="删除成功")
+
+
+@router.get("/{source_id}/export-clip", response_model=ApiResponse[ExportResponse])
+async def export_clip(
+    source_id: str,
+    db: Session = Depends(get_db),
+):
+    """导出文件数据源的原始视频片段"""
+    source_repo = VideoSourceRepository(db)
+    source = source_repo.get_by_id(source_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="数据源不存在")
+
+    if source.source_type != "file" or not source.file_path:
+        raise HTTPException(status_code=400, detail="仅文件数据源支持导出片段")
+
+    source_path = Path(source.file_path)
+    if not source_path.exists():
+        raise HTTPException(status_code=404, detail="源视频文件不存在")
+
+    export_dir = Path(settings.BASE_DIR) / "downloads"
+    export_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in (source.name or source_id))
+    suffix = source_path.suffix or ".mp4"
+    filename = f"clip_{safe_name}_{timestamp}{suffix}"
+    target_path = export_dir / filename
+
+    try:
+        shutil.copy2(source_path, target_path)
+    except Exception as e:
+        logger.exception(f"导出片段失败: {source_id}, {e}")
+        raise HTTPException(status_code=500, detail="导出片段失败")
+
+    task_repo = ExportTaskRepository(db)
+    task = ExportTask(
+        task_id=str(uuid.uuid4()),
+        source_id=source_id,
+        export_type="clip",
+        status="completed",
+        file_path=str(target_path),
+    )
+    task_repo.create(task)
+
+    logger.info(f"片段已导出: {target_path}")
+    return ApiResponse.success(data=ExportResponse(url=f"/downloads/{filename}"))

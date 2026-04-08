@@ -1,3 +1,11 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["runs*"]
+
 [project]
 name = "crowdflow-backend"
 version = "0.1.0"
@@ -10,6 +18,8 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "sqlalchemy>=2.0.0",
     "ultralytics>=8.3.0",
+    "shapely>=2.0.0",
+    "lap>=0.5.12",
     "opencv-python>=4.10.0",
     "numpy>=1.26.0",
     "python-multipart>=0.0.9",

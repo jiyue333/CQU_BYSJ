@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     DATABASE_URL: Optional[str] = None  # 可在 .env 中直接设置完整 URL
 
     # YOLO 模型配置
-    YOLO_MODEL_PATH: str = "yolov8n.pt"
+    YOLO_MODEL_PATH: str = str(_PROJECT_ROOT / "yolo11n.pt")
     YOLO_CONF_THRESHOLD: float = 0.5
     YOLO_DEVICE: str = "cpu"  # cpu / cuda / mps
 
@@ -55,10 +55,16 @@ class Settings(BaseSettings):
     ALERT_COOLDOWN_SECONDS: int = 30  # 同一区域告警冷却时间（秒）
 
     # 密度计算配置
-    # 密度 = 人数 × DENSITY_FACTOR / 面积（像素²）
-    # 默认 10000，使得 100 人 / 10000 像素² ≈ 1.0
-    DENSITY_FACTOR: float = 10000.0
-    DENSITY_MAX: float = 100.0  # 密度上限
+    # 新方案：密度 = 人数 / 物理面积(m²)
+    # 旧参数保留用于兼容，但不再用于核心计算
+    DENSITY_FACTOR: float = 10000.0  # [已弃用] 旧像素密度缩放因子
+    DENSITY_MAX: float = 20.0  # 密度上限（人/m²），20人/m²已是极端拥挤
+
+    # VLM 面积估算配置
+    VLM_API_KEY: Optional[str] = None
+    VLM_MODEL: str = "gpt-4o"
+    VLM_BASE_URL: str = "https://api.openai.com/v1"
+    VLM_TIMEOUT: int = 60  # VLM 调用超时（秒）
 
     def get_database_url(self) -> str:
         """获取数据库 URL"""

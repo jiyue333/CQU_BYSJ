@@ -104,23 +104,23 @@ def calculate_polygon_area(polygon: list[tuple[float, float]]) -> float:
     return abs(area) / 2.0
 
 
-def calculate_density(count: int, area: float, factor: float = 10000.0, max_value: float = 100.0) -> float:
+def calculate_density(count: int, area_m2: float, max_value: float = 20.0) -> float:
     """
-    计算人群密度
+    计算人群密度（物理密度）
 
-    公式: density = count × factor / area
+    公式: density = count / area_m2
     结果范围: 0 ~ max_value
+    单位: 人/m²
 
     Args:
         count: 区域内人数
-        area: 区域面积（平方像素）
-        factor: 缩放因子，默认 10000（使得 100 人 / 10000 像素² ≈ 1.0）
-        max_value: 密度上限，默认 100
+        area_m2: 区域物理面积（平方米），由 VLM 估算
+        max_value: 密度上限，默认 20.0（20人/m² 已是极端拥挤）
 
     Returns:
-        密度值（0 ~ max_value）
+        密度值（人/m²，0 ~ max_value）
     """
-    if area <= 0:
+    if area_m2 <= 0:
         return 0.0
-    density = count * factor / area
+    density = count / area_m2
     return min(round(density, 2), max_value)

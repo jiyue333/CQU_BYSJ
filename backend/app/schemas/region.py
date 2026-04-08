@@ -44,11 +44,12 @@ class RegionResponse(BaseModel):
     name: str = Field(..., description="区域名称")
     points: list[list[float]] = Field(..., description="多边形顶点坐标")
     color: str = Field(..., description="区域颜色")
+    area_physical: Optional[float] = Field(default=None, description="区域物理面积（m²），由VLM估算")
     # 预警阈值
     count_warning: Optional[int] = Field(default=None, description="人数警告阈值")
     count_critical: Optional[int] = Field(default=None, description="人数严重阈值")
-    density_warning: Optional[float] = Field(default=None, description="密度警告阈值")
-    density_critical: Optional[float] = Field(default=None, description="密度严重阈值")
+    density_warning: Optional[float] = Field(default=None, description="密度警告阈值（人/m²）")
+    density_critical: Optional[float] = Field(default=None, description="密度严重阈值（人/m²）")
 
     model_config = {"from_attributes": True}
 

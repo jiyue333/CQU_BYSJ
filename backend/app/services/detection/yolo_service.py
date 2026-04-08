@@ -51,7 +51,7 @@ class YOLOService:
 
     def __init__(
         self,
-        model_path: str = "yolov8n.pt",
+        model_path: str | None = None,
         regions: dict[str, list[tuple]] | None = None,
         conf: float = 0.5,
         device: str = "cpu",
@@ -67,6 +67,8 @@ class YOLOService:
             colormap: 热力图 colormap
             region_line_thickness: 区域边框线条粗细
         """
+        model_path = model_path or settings.YOLO_MODEL_PATH
+
         # 调试：打印模型加载信息
         logger.info(f"[YOLO] 初始化 YOLOService")
         logger.info(f"[YOLO] model_path = {model_path}")
@@ -184,6 +186,53 @@ class YOLOService:
 
         return result
 
+    def _draw_detections(self, frame: np.ndarray) -> np.ndarray:
+        """
+        在帧上绘制检测框和置信度（从 self.heatmap 获取检测数据）
+
+        Args:
+            frame: 输入帧
+
+        Returns:
+            绘制后的帧
+        """
+        result = frame.copy()
+
+        # 从 heatmap 对象获取检测框和置信度
+        if not hasattr(self.heatmap, 'boxes') or self.heatmap.boxes is None:
+            return result
+
+        try:
+            boxes = self.heatmap.boxes.cpu().numpy()
+            confs = self.heatmap.confs if hasattr(self.heatmap, 'confs') else []
+        except Exception:
+            return result
+
+        if len(boxes) == 0:
+            return result
+
+        for i, box in enumerate(boxes):
+            x1, y1, x2, y2 = map(int, box[:4])
+
+            # 绘制检测框（绿色）
+            cv2.rectangle(result, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+            # 绘制置信度标签
+            if i < len(confs):
+                conf = confs[i]
+                label = f"{conf:.2f}"
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                font_scale = 0.5
+                thickness = 1
+                (text_w, text_h), _ = cv2.getTextSize(label, font, font_scale, thickness)
+
+                # 背景矩形
+                cv2.rectangle(result, (x1, y1 - text_h - 4), (x1 + text_w + 4, y1), (0, 255, 0), -1)
+                # 文本
+                cv2.putText(result, label, (x1 + 2, y1 - 2), font, font_scale, (0, 0, 0), thickness, cv2.LINE_AA)
+
+        return result
+
     def _draw_total_count(self, frame: np.ndarray, total_count: int) -> np.ndarray:
         """
         在右上角绘制总人数
@@ -250,6 +299,9 @@ class YOLOService:
         # 热力图处理
         heatmap_result = self.heatmap(frame)
         output_frame = heatmap_result.plot_im
+
+        # 在热力图上叠加检测框和置信度
+        output_frame = self._draw_detections(output_frame)
 
         # 区域计数处理
         total_count = 0
