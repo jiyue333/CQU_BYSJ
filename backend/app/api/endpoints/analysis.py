@@ -11,6 +11,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from functools import partial
+from pathlib import Path
 from typing import Optional
 
 import cv2
@@ -35,6 +36,7 @@ from app.schemas.analysis import (
 )
 from app.services.video import VideoService
 from app.services.detection import YOLOService, DetectionResult
+from app.services.vlm import VLMAreaEstimator
 from app.services.alert import AlertService, RegionThresholdConfig
 from app.services.stats import stats_aggregator, FrameStats, RegionFrameStats
 from app.api.endpoints.websocket import ws_manager
@@ -50,6 +52,9 @@ _tasks: dict[str, asyncio.Task] = {}
 
 # 线程池用于 CPU 密集型推理
 _executor = ThreadPoolExecutor(max_workers=4)
+
+# 参考帧目录
+_REF_FRAMES_DIR = Path(settings.DATA_DIR) / "ref_frames"
 
 
 def _get_regions_dict(regions: list, img_width: int = 0, img_height: int = 0) -> dict[str, list[tuple]]:
@@ -87,6 +92,42 @@ def _get_regions_dict(regions: list, img_width: int = 0, img_height: int = 0) ->
 def _get_region_id_map(regions: list) -> dict[str, str]:
     """构建区域名称到 ID 的映射"""
     return {region.name: region.region_id for region in regions}
+
+
+def save_reference_frame(source_id: str, frame: "np.ndarray") -> Path:
+    """
+    保存参考帧到磁盘，供区域 API 后续使用
+
+    Args:
+        source_id: 数据源 ID
+        frame: BGR 图像帧
+
+    Returns:
+        参考帧文件路径
+    """
+    _REF_FRAMES_DIR.mkdir(parents=True, exist_ok=True)
+    ref_path = _REF_FRAMES_DIR / f"{source_id}.jpg"
+    cv2.imwrite(str(ref_path), frame)
+    logger.info(f"[参考帧] 已保存: {ref_path}")
+    return ref_path
+
+
+def load_reference_frame(source_id: str) -> Optional["np.ndarray"]:
+    """
+    从磁盘加载参考帧
+
+    Args:
+        source_id: 数据源 ID
+
+    Returns:
+        BGR 图像帧，或 None（如果不存在）
+    """
+    ref_path = _REF_FRAMES_DIR / f"{source_id}.jpg"
+    if ref_path.exists():
+        frame = cv2.imread(str(ref_path))
+        if frame is not None:
+            return frame
+    return None
 
 
 async def _inference_loop(source_id: str) -> None:
@@ -127,7 +168,20 @@ async def _inference_loop(source_id: str) -> None:
 
         logger.info(f"视频源已打开: {video_path}, 尺寸={video_info.width}x{video_info.height}, FPS={video_info.fps}")
 
-        # 3. 获取区域配置并转换为像素坐标
+        # 3. 截取参考帧（用 cap.read() 避免消耗 generator）
+        ret, first_frame = video_service.cap.read()
+        if not ret:
+            logger.error(f"无法读取第一帧: {source_id}")
+            source_repo.update_status(source_id, "error")
+            return
+
+        # 重置视频位置到开头
+        video_service.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
+        # 保存参考帧（供区域 API 后续使用）
+        save_reference_frame(source_id, first_frame)
+
+        # 4. 获取区域配置并转换为像素坐标
         region_repo = RegionRepository(db)
         regions = region_repo.get_by_source_id(source_id)
         regions_dict = _get_regions_dict(regions, video_info.width, video_info.height)
@@ -135,7 +189,24 @@ async def _inference_loop(source_id: str) -> None:
 
         logger.info(f"区域配置: {list(regions_dict.keys()) if regions_dict else '无'}")
 
-        # 4. 构建区域阈值配置（从 Region 表读取）
+        # 5. VLM 面积估算（仅在有区域配置时）
+        physical_areas: dict[str, float] = {}
+        if regions_dict:
+            logger.info("[VLM] 开始估算区域物理面积...")
+            estimator = VLMAreaEstimator()
+            physical_areas = await estimator.estimate_areas(first_frame, regions_dict)
+
+            # 更新数据库中各区域的 area_physical
+            for region in regions:
+                if region.name in physical_areas:
+                    region_repo.update(region, area_physical=physical_areas[region.name])
+
+            if physical_areas:
+                logger.info(f"[VLM] 面积估算完成: {physical_areas}")
+            else:
+                logger.warning("[VLM] 面积估算未返回结果，密度将不可用")
+
+        # 6. 构建区域阈值配置（从 Region 表读取）
         region_threshold_configs = []
         for region in regions:
             region_threshold_configs.append(RegionThresholdConfig(
@@ -146,18 +217,19 @@ async def _inference_loop(source_id: str) -> None:
                 density_critical=region.density_critical,
             ))
 
-        # 5. 初始化服务
+        # 7. 初始化服务
         yolo_service = YOLOService(
             model_path=settings.YOLO_MODEL_PATH,
             regions=regions_dict if regions_dict else None,
             conf=settings.YOLO_CONF_THRESHOLD,
             device=settings.YOLO_DEVICE,
+            region_physical_areas=physical_areas,
         )
         alert_service = AlertService(cooldown_seconds=settings.ALERT_COOLDOWN_SECONDS)
         alert_service.set_region_thresholds(region_threshold_configs)
         alert_repo = AlertRepository(db)
 
-        # 6. 推理循环
+        # 8. 推理循环
         frame_count = 0
         last_flush_time = datetime.utcnow()
         loop = asyncio.get_event_loop()
@@ -314,9 +386,6 @@ async def start_analysis(
 
     if not source:
         raise HTTPException(status_code=404, detail="数据源不存在")
-
-    # if source.status == "running":
-        # raise HTTPException(status_code=400, detail="分析任务已在运行中")
 
     # 检查是否已有运行中的任务
     if request.source_id in _tasks and not _tasks[request.source_id].done():

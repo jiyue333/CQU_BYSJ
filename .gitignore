@@ -152,3 +152,6 @@ docs/*
 .omc/
 .claude/
 downloads/
+dataset/
+.playwright-mcp/
+.DS_Store

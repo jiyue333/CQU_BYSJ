@@ -83,7 +83,7 @@ class StatsExporter:
 
             if region_id:
                 # 导出指定区域数据
-                writer.writerow(["时间", "区域名称", "平均人数", "最大人数", "最小人数", "拥挤指数"])
+                writer.writerow(["时间", "区域名称", "平均人数", "最大人数", "最小人数", "平均密度(人/m²)"])
                 for s in stats:
                     region_data = s.get_region_stats_dict()
                     if region_id in region_data:
@@ -94,11 +94,11 @@ class StatsExporter:
                             f"{r.avg:.1f}",
                             r.max,
                             r.min,
-                            f"{r.crowd_index:.2f}",
+                            f"{r.density_avg:.2f}",
                         ])
             else:
                 # 导出全局数据
-                writer.writerow(["时间", "平均人数", "最大人数", "最小人数", "平均密度", "拥挤指数", "采样数"])
+                writer.writerow(["时间", "平均人数", "最大人数", "最小人数", "平均密度(人/m²)", "采样数"])
                 for s in stats:
                     writer.writerow([
                         s.time_bucket,
@@ -106,7 +106,6 @@ class StatsExporter:
                         s.total_count_max,
                         s.total_count_min,
                         f"{s.total_density_avg:.4f}",
-                        f"{s.crowd_index_avg:.2f}" if s.crowd_index_avg else "",
                         s.sample_count,
                     ])
 
@@ -166,7 +165,7 @@ class StatsExporter:
         header_fill = PatternFill(start_color="CCCCCC", end_color="CCCCCC", fill_type="solid")
 
         if region_id:
-            headers = ["时间", "区域名称", "平均人数", "最大人数", "最小人数", "拥挤指数"]
+            headers = ["时间", "区域名称", "平均人数", "最大人数", "最小人数", "平均密度(人/m²)"]
             ws.append(headers)
 
             for s in stats:
@@ -179,10 +178,10 @@ class StatsExporter:
                         round(r.avg, 1),
                         r.max,
                         r.min,
-                        round(r.crowd_index, 2),
+                        round(r.density_avg, 2),
                     ])
         else:
-            headers = ["时间", "平均人数", "最大人数", "最小人数", "平均密度", "拥挤指数", "采样数"]
+            headers = ["时间", "平均人数", "最大人数", "最小人数", "平均密度(人/m²)", "采样数"]
             ws.append(headers)
 
             for s in stats:
@@ -192,7 +191,6 @@ class StatsExporter:
                     s.total_count_max,
                     s.total_count_min,
                     round(s.total_density_avg, 4),
-                    round(s.crowd_index_avg, 2) if s.crowd_index_avg else None,
                     s.sample_count,
                 ])
 
@@ -277,7 +275,7 @@ class StatsExporter:
 
         header_font = Font(bold=True)
         header_fill = PatternFill(start_color="CCCCCC", end_color="CCCCCC", fill_type="solid")
-        headers = ["时间", "平均人数", "最大人数", "最小人数", "拥挤指数"]
+        headers = ["时间", "平均人数", "最大人数", "最小人数", "平均密度(人/m²)"]
 
         for region_id, region_name in all_regions.items():
             # 创建 sheet（名称最多 31 字符）
@@ -294,7 +292,7 @@ class StatsExporter:
                         round(r.avg, 1),
                         r.max,
                         r.min,
-                        round(r.crowd_index, 2),
+                        round(r.density_avg, 2),
                     ])
 
             # 应用表头样式
@@ -315,7 +313,7 @@ class StatsExporter:
 
         with open(file_path, "w", newline="", encoding="utf-8-sig") as f:
             writer = csv.writer(f)
-            writer.writerow(["时间", "区域ID", "区域名称", "平均人数", "最大人数", "最小人数", "拥挤指数"])
+            writer.writerow(["时间", "区域ID", "区域名称", "平均人数", "最大人数", "最小人数", "平均密度(人/m²)"])
 
             for s in stats:
                 for region_id, r in s.get_region_stats_dict().items():
@@ -326,7 +324,7 @@ class StatsExporter:
                         f"{r.avg:.1f}",
                         r.max,
                         r.min,
-                        f"{r.crowd_index:.2f}",
+                        f"{r.density_avg:.2f}",
                     ])
 
         logger.info(f"区域统计 CSV 导出完成: {file_path}")
@@ -368,7 +366,6 @@ class StatsExporter:
         # 全局统计
         all_counts = [s.total_count_avg for s in stats]
         all_densities = [s.total_density_avg for s in stats]
-        all_crowd_indices = [s.crowd_index_avg for s in stats if s.crowd_index_avg]
 
         # 峰值时段
         peak_stat = max(stats, key=lambda s: s.total_count_max)
@@ -381,20 +378,20 @@ class StatsExporter:
                     region_summary[region_id] = {
                         "name": r.name,
                         "counts": [],
-                        "crowd_indices": [],
+                        "densities": [],
                     }
                 region_summary[region_id]["counts"].append(r.avg)
-                region_summary[region_id]["crowd_indices"].append(r.crowd_index)
+                region_summary[region_id]["densities"].append(r.density_avg)
 
         regions_report = {}
         for region_id, data in region_summary.items():
             counts = data["counts"]
-            indices = data["crowd_indices"]
+            densities = data["densities"]
             regions_report[region_id] = {
                 "name": data["name"],
                 "avg_count": sum(counts) / len(counts) if counts else 0,
                 "max_count": max(counts) if counts else 0,
-                "avg_crowd_index": sum(indices) / len(indices) if indices else 0,
+                "avg_density": sum(densities) / len(densities) if densities else 0,
             }
 
         return {
@@ -405,7 +402,6 @@ class StatsExporter:
                 "max_count": max(s.total_count_max for s in stats),
                 "min_count": min(s.total_count_min for s in stats),
                 "avg_density": sum(all_densities) / len(all_densities),
-                "avg_crowd_index": sum(all_crowd_indices) / len(all_crowd_indices) if all_crowd_indices else None,
                 "peak_time": peak_stat.time_bucket,
                 "peak_count": peak_stat.total_count_max,
             },

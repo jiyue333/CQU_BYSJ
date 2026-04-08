@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     """应用配置"""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_PROJECT_ROOT / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -55,9 +55,7 @@ class Settings(BaseSettings):
     ALERT_COOLDOWN_SECONDS: int = 30  # 同一区域告警冷却时间（秒）
 
     # 密度计算配置
-    # 新方案：密度 = 人数 / 物理面积(m²)
-    # 旧参数保留用于兼容，但不再用于核心计算
-    DENSITY_FACTOR: float = 10000.0  # [已弃用] 旧像素密度缩放因子
+    # 密度 = 人数 / 物理面积(m²)，物理面积由 VLM 估算
     DENSITY_MAX: float = 20.0  # 密度上限（人/m²），20人/m²已是极端拥挤
 
     # VLM 面积估算配置

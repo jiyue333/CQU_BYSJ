@@ -2,6 +2,7 @@
 区域配置 API
 
 处理区域的增删改查
+区域创建/更新时自动通过 VLM 估算物理面积
 """
 
 import uuid
@@ -21,6 +22,8 @@ from app.schemas.region import (
     RegionResponse,
     RegionListResponse,
 )
+from app.services.vlm import VLMAreaEstimator
+from app.api.endpoints.analysis import load_reference_frame, _get_regions_dict
 
 router = APIRouter(prefix="/regions", tags=["区域配置"])
 
@@ -34,6 +37,7 @@ def _region_to_response(region: Region) -> RegionResponse:
         name=region.name,
         points=points,
         color=region.color,
+        area_physical=region.area_physical,
         count_warning=region.count_warning,
         count_critical=region.count_critical,
         density_warning=region.density_warning,
@@ -85,6 +89,22 @@ async def create_region(
         density_warning=request.density_warning,
         density_critical=request.density_critical,
     )
+
+    # 尝试通过 VLM 估算物理面积
+    ref_frame = load_reference_frame(request.source_id)
+    if ref_frame is not None:
+        try:
+            h, w = ref_frame.shape[:2]
+            regions_for_vlm = _get_regions_dict([region], w, h)
+            if regions_for_vlm:
+                estimator = VLMAreaEstimator()
+                areas = await estimator.estimate_areas(ref_frame, regions_for_vlm)
+                if region.name in areas:
+                    region.area_physical = areas[region.name]
+                    logger.info(f"[VLM] 区域 '{region.name}' 物理面积: {region.area_physical:.1f} m²")
+        except Exception as e:
+            logger.warning(f"[VLM] 区域面积估算失败: {e}")
+
     region_repo.create(region)
     logger.info(f"区域已创建: {region.region_id}")
 
@@ -125,6 +145,22 @@ async def update_region(
     if update_data:
         region = region_repo.update(region, **update_data)
         logger.info(f"区域已更新: {region_id}")
+
+        # 如果多边形点发生变化，重新估算物理面积
+        if request.points is not None:
+            ref_frame = load_reference_frame(region.source_id)
+            if ref_frame is not None:
+                try:
+                    h, w = ref_frame.shape[:2]
+                    regions_for_vlm = _get_regions_dict([region], w, h)
+                    if regions_for_vlm:
+                        estimator = VLMAreaEstimator()
+                        areas = await estimator.estimate_areas(ref_frame, regions_for_vlm)
+                        if region.name in areas:
+                            region = region_repo.update(region, area_physical=areas[region.name])
+                            logger.info(f"[VLM] 区域 '{region.name}' 物理面积已更新: {region.area_physical:.1f} m²")
+                except Exception as e:
+                    logger.warning(f"[VLM] 区域面积重估失败: {e}")
 
     return ApiResponse.success(data=_region_to_response(region))
 

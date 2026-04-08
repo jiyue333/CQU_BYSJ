@@ -200,7 +200,7 @@
                     </div>
                     <div class="region-row__stats">
                       <span>人数 {{ formatCount(region.count) }}</span>
-                      <span>密度 {{ formatDecimal(region.density, 2) }}</span>
+                      <span>密度 {{ formatDecimal(region.density, 2) }} 人/m²</span>
                     </div>
                     <button class="icon-button" type="button" @click="openRegionModal(region)">
                       <IconSymbol name="edit" :size="16" />
@@ -881,12 +881,12 @@
                   <input v-model="regionModal.countCritical" class="field" type="number" min="0" />
                 </label>
                 <label class="field-group">
-                  <span>密度预警</span>
-                  <input v-model="regionModal.densityWarning" class="field" type="number" min="0" step="0.1" />
+                  <span>密度预警 (人/m²)</span>
+                  <input v-model="regionModal.densityWarning" class="field" type="number" min="0" step="0.1" placeholder="如 2.0" />
                 </label>
                 <label class="field-group">
-                  <span>密度严重</span>
-                  <input v-model="regionModal.densityCritical" class="field" type="number" min="0" step="0.1" />
+                  <span>密度严重 (人/m²)</span>
+                  <input v-model="regionModal.densityCritical" class="field" type="number" min="0" step="0.1" placeholder="如 4.0" />
                 </label>
               </div>
 
@@ -1056,7 +1056,7 @@ const historyMetrics = [
   { key: "total_count_avg", label: "平均人数", digits: 0, color: "#2563EB" },
   { key: "total_count_max", label: "峰值人数", digits: 0, color: "#2563EB" },
   { key: "total_count_min", label: "最低人数", digits: 0, color: "#0F766E" },
-  { key: "total_density_avg", label: "平均密度", digits: 2, color: "#F97316" },
+  { key: "total_density_avg", label: "平均密度 (人/m²)", digits: 2, color: "#F97316" },
 ] as const satisfies ReadonlyArray<{
   key: HistoryMetricKey;
   label: string;
@@ -1079,8 +1079,8 @@ const configTabs: Array<{ key: ConfigSection; label: string }> = [
 const defaultRegionThresholds = {
   count_warning: 50,
   count_critical: 100,
-  density_warning: 5,
-  density_critical: 8,
+  density_warning: 2,
+  density_critical: 4,
 };
 
 const regionLayouts: Array<{ id: string; label: string; description: string; regions: RegionDraft[] }> = [
@@ -1463,7 +1463,7 @@ const regionSummaryRows = computed(() =>
       count,
       density,
       tone,
-      description: `${formatCount(count)} 人 · 密度 ${formatDecimal(density, 2)}`,
+      description: `${formatCount(count)} 人 · 密度 ${formatDecimal(density, 2)} 人/m²`,
       thresholdText: buildThresholdText(region),
     };
   })
@@ -1659,15 +1659,15 @@ function historyIntervalLabel(value: HistoryInterval) {
 
 function getDensityLabel(value: number | null | undefined) {
   if (!Number.isFinite(value)) return "暂无密度";
-  if ((value as number) >= 8) return "拥挤";
-  if ((value as number) >= 5) return "关注";
+  if ((value as number) >= 4) return "拥挤";
+  if ((value as number) >= 2) return "关注";
   return "平稳";
 }
 
 function getDensityTone(value: number | null | undefined) {
   if (!Number.isFinite(value)) return "neutral";
-  if ((value as number) >= 8) return "danger";
-  if ((value as number) >= 5) return "warning";
+  if ((value as number) >= 4) return "danger";
+  if ((value as number) >= 2) return "warning";
   return "success";
 }
 

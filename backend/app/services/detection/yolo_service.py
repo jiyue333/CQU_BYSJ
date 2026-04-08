@@ -2,9 +2,9 @@
 YOLO 检测服务
 
 同时提供：
-- 热力图可视化（solutions.Heatmap）
+- 实时热力图可视化（自定义 RealtimeHeatmapRenderer）
 - 多区域实时人数统计（solutions.RegionCounter）
-- 区域密度计算
+- 区域物理密度计算（人/m²）
 - 区域边框和人数叠加显示
 """
 
@@ -18,9 +18,10 @@ import numpy as np
 # 过滤 Ultralytics "No tracks found" 警告
 warnings.filterwarnings("ignore", message=".*No tracks found.*")
 
-from ultralytics import solutions
+from ultralytics import YOLO, solutions
 
 from app.utils import calculate_density, calculate_polygon_area
+from app.services.detection.realtime_heatmap import RealtimeHeatmapRenderer
 from app.core.config import settings
 from app.core.logger import logger
 
@@ -31,13 +32,13 @@ class DetectionResult:
 
     frame: np.ndarray  # 热力图叠加后的帧
     total_count: int  # 总人数
-    total_density: float  # 总密度
+    total_density: float  # 总密度（人/m²）
     region_counts: dict[str, int] = field(default_factory=dict)  # 各区域人数
-    region_densities: dict[str, float] = field(default_factory=dict)  # 各区域密度
+    region_densities: dict[str, float] = field(default_factory=dict)  # 各区域密度（人/m²）
 
 
 class YOLOService:
-    """YOLO 检测服务 - 热力图 + 区域计数 + 密度分析"""
+    """YOLO 检测服务 - 实时热力图 + 区域计数 + 物理密度分析"""
 
     # 区域边框颜色列表 (BGR)
     REGION_COLORS = [
@@ -57,6 +58,7 @@ class YOLOService:
         device: str = "cpu",
         colormap: int = cv2.COLORMAP_JET,
         region_line_thickness: int = 2,
+        region_physical_areas: dict[str, float] | None = None,
     ):
         """
         Args:
@@ -66,54 +68,61 @@ class YOLOService:
             device: 运行设备
             colormap: 热力图 colormap
             region_line_thickness: 区域边框线条粗细
+            region_physical_areas: 各区域物理面积（m²），由 VLM 估算
         """
         model_path = model_path or settings.YOLO_MODEL_PATH
 
-        # 调试：打印模型加载信息
         logger.info(f"[YOLO] 初始化 YOLOService")
         logger.info(f"[YOLO] model_path = {model_path}")
         logger.info(f"[YOLO] model_path exists = {Path(model_path).exists()}")
         logger.info(f"[YOLO] model_path absolute = {Path(model_path).absolute()}")
         logger.info(f"[YOLO] conf = {conf}, device = {device}")
         logger.info(f"[YOLO] regions = {list(regions.keys()) if regions else 'None'}")
+        logger.info(f"[YOLO] physical_areas = {region_physical_areas}")
 
         self.regions = regions or {}
+        self.conf = conf
+        self.device = device
         self.region_line_thickness = region_line_thickness
 
-        # 预计算各区域面积
+        # 区域物理面积（m²）
+        self.region_physical_areas: dict[str, float] = region_physical_areas or {}
+
+        # 预计算各区域像素面积（用于兼容）
         self.region_areas: dict[str, float] = {}
         for name, polygon in self.regions.items():
             self.region_areas[name] = calculate_polygon_area(polygon)
 
+        # 直接加载 YOLO 模型（替代 solutions.Heatmap）
+        self.model = YOLO(model_path)
+
+        # 实时热力图渲染器
+        self.heatmap_renderer = RealtimeHeatmapRenderer(
+            colormap=colormap,
+            alpha=0.5,
+            sigma=40,
+        )
+
+        # 区域计数（如果有区域定义）
         common_args = {
             "model": model_path,
             "conf": conf,
             "device": device,
             "classes": [0],  # 只检测 person
-            "show": False,  # 后端无 GUI，必须为 False
-            "verbose": False,  # 关闭控制台输出
-            "show_in": False,  # 禁用进入计数显示
-            "show_out": False,  # 禁用离开计数显示
-            "iou": 0.85  # 设置 IoU 阈值
+            "show": False,
+            "verbose": False,
+            "show_in": False,
+            "show_out": False,
+            "iou": 0.85,
         }
 
-        # 热力图
-        self.heatmap = solutions.Heatmap(
-            colormap=colormap,
-            show_labels=False,  # 禁用标签显示
-            show_conf=False,  # 禁用置信度显示
-            **common_args
-        )
-
-        # 区域计数（如果有区域定义）
-        # 注意：RegionCounter 仅用于获取计数，不使用其绘制输出
         self.region_counter = None
         if regions:
             self.region_counter = solutions.RegionCounter(
                 region=regions,
-                line_width=0,  # 禁用边框绘制
-                show_labels=False,  # 禁用标签显示
-                show_conf=False,  # 禁用置信度显示
+                line_width=0,
+                show_labels=False,
+                show_conf=False,
                 **common_args
             )
 
@@ -138,7 +147,6 @@ class YOLOService:
             cv2.polylines(result, [pts], isClosed=True, color=color, thickness=self.region_line_thickness)
 
             # 找到区域右上角位置（x最大且y最小的点附近）
-            # 使用边界框的右上角
             x_min, y_min = pts.min(axis=0)
             x_max, y_max = pts.max(axis=0)
 
@@ -186,30 +194,19 @@ class YOLOService:
 
         return result
 
-    def _draw_detections(self, frame: np.ndarray) -> np.ndarray:
+    def _draw_detections(self, frame: np.ndarray, boxes: np.ndarray, confs: np.ndarray) -> np.ndarray:
         """
-        在帧上绘制检测框和置信度（从 self.heatmap 获取检测数据）
+        在帧上绘制检测框和置信度
 
         Args:
             frame: 输入帧
+            boxes: 检测框 [[x1,y1,x2,y2], ...]
+            confs: 置信度列表
 
         Returns:
             绘制后的帧
         """
         result = frame.copy()
-
-        # 从 heatmap 对象获取检测框和置信度
-        if not hasattr(self.heatmap, 'boxes') or self.heatmap.boxes is None:
-            return result
-
-        try:
-            boxes = self.heatmap.boxes.cpu().numpy()
-            confs = self.heatmap.confs if hasattr(self.heatmap, 'confs') else []
-        except Exception:
-            return result
-
-        if len(boxes) == 0:
-            return result
 
         for i, box in enumerate(boxes):
             x1, y1, x2, y2 = map(int, box[:4])
@@ -294,17 +291,43 @@ class YOLOService:
             frame: BGR 图像帧
 
         Returns:
-            DetectionResult: 热力图帧 + 区域人数统计 + 密度
+            DetectionResult: 热力图帧 + 区域人数统计 + 密度（人/m²）
         """
-        # 热力图处理
-        heatmap_result = self.heatmap(frame)
-        output_frame = heatmap_result.plot_im
+        # 1. YOLO 推理 — 直接调用模型（替代 solutions.Heatmap）
+        results = self.model.track(
+            frame,
+            persist=True,
+            classes=[0],
+            conf=self.conf,
+            device=self.device,
+            verbose=False,
+        )
 
-        # 在热力图上叠加检测框和置信度
-        output_frame = self._draw_detections(output_frame)
+        # 2. 提取检测框和中心点
+        boxes = np.empty((0, 4))
+        confs = np.array([])
+        detection_centers: list[tuple[int, int]] = []
 
-        # 区域计数处理
-        total_count = 0
+        if results and len(results) > 0 and results[0].boxes is not None:
+            boxes_data = results[0].boxes
+            if len(boxes_data) > 0:
+                boxes = boxes_data.xyxy.cpu().numpy()
+                confs = boxes_data.conf.cpu().numpy()
+
+                # 计算每个检测框的中心点（用于热力图）
+                for box in boxes:
+                    cx = int((box[0] + box[2]) / 2)
+                    cy = int((box[1] + box[3]) / 2)
+                    detection_centers.append((cx, cy))
+
+        # 3. 生成实时热力图（纯快照，无累积）
+        output_frame = self.heatmap_renderer.render(frame, detection_centers)
+
+        # 4. 叠加检测框
+        output_frame = self._draw_detections(output_frame, boxes, confs)
+
+        # 5. 区域计数 + 密度计算
+        total_count = len(detection_centers)
         region_counts = {}
         region_densities = {}
 
@@ -314,30 +337,34 @@ class YOLOService:
             total_count = region_result.total_tracks
             region_counts = dict(region_result.region_counts) if region_result.region_counts else {}
 
-            # 计算各区域密度
+            # 计算各区域物理密度（人/m²）
             for name in self.regions.keys():
                 count = region_counts.get(name, 0)
-                area = self.region_areas.get(name, 0)
-                region_densities[name] = calculate_density(
-                    count, area,
-                    factor=settings.DENSITY_FACTOR,
-                    max_value=settings.DENSITY_MAX
-                )
+                area_m2 = self.region_physical_areas.get(name, 0)
+                if area_m2 > 0:
+                    region_densities[name] = calculate_density(
+                        count, area_m2,
+                        max_value=settings.DENSITY_MAX
+                    )
+                else:
+                    # 无物理面积时不输出密度
+                    region_densities[name] = 0.0
 
             # 在热力图上叠加区域边框和人数
             output_frame = self._draw_regions(output_frame, region_counts)
         else:
-            # 无区域时从热力图结果获取总人数
-            if hasattr(heatmap_result, "total_tracks"):
-                total_count = heatmap_result.total_tracks
-            # 只在无区域时显示右上角总人数
+            # 无区域时显示右上角总人数
             output_frame = self._draw_total_count(output_frame, total_count)
 
-        total_density = calculate_density(
-            total_count, frame.shape[0] * frame.shape[1],
-            factor=settings.DENSITY_FACTOR,
-            max_value=settings.DENSITY_MAX
-        )
+        # 6. 计算总体密度
+        total_physical_area = sum(self.region_physical_areas.values()) if self.region_physical_areas else 0
+        if total_physical_area > 0:
+            total_density = calculate_density(
+                total_count, total_physical_area,
+                max_value=settings.DENSITY_MAX
+            )
+        else:
+            total_density = 0.0
 
         return DetectionResult(
             frame=output_frame,
