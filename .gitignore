@@ -152,6 +152,7 @@ docs/*
 .omc/
 .claude/
 downloads/
-dataset/
+dataset/*
 .playwright-mcp/
 .DS_Store
+yolo/
