@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 def __getattr__(name: str):
     """Lazy-import model classes on first access."""
     if name in MODELS:
-        return getattr(importlib.import_module("ultralytics.models"), name)
+        return getattr(importlib.import_module("yolo.models"), name)
     raise AttributeError(f"module {__name__} has no attribute {name}")
 
 

@@ -2081,11 +2081,11 @@ class MCS(nn.Module):
         super().__init__()
         assert c1 % n_scales == 0, f"c1={c1} must be divisible by n_scales={n_scales}"
         self.n_scales = n_scales
+        self.pool_sizes = list(pool_sizes[:n_scales])
         c_split = c1 // n_scales
         self.branches = nn.ModuleList()
-        for ps in pool_sizes[:n_scales]:
+        for ps in self.pool_sizes:
             self.branches.append(nn.Sequential(
-                nn.AdaptiveAvgPool2d(ps),
                 nn.Conv2d(c_split, c_split, 1, bias=False),
                 nn.BatchNorm2d(c_split),
             ))
@@ -2099,8 +2099,9 @@ class MCS(nn.Module):
         B, C, H, W = x.shape
         chunks = x.chunk(self.n_scales, dim=1)
         outs = []
-        for chunk, branch in zip(chunks, self.branches):
-            out = branch(chunk)
+        for chunk, branch, ps in zip(chunks, self.branches, self.pool_sizes):
+            pooled = F.interpolate(chunk, size=(ps, ps), mode='bilinear', align_corners=False)
+            out = branch(pooled)
             out = F.interpolate(out, size=(H, W), mode='bilinear', align_corners=False)
             outs.append(out)
         y = torch.cat(outs, dim=1)

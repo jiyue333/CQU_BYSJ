@@ -1,12 +1,41 @@
 # YOLO26n crowd detection training profile
-model: yolo/cfg/models/26/yolo26n-p2-crowd.yaml
-data: CrowdHuman.yaml
-epochs: 300
+# 基于官方 YOLO26n 训练秘籍默认参数
+# https://docs.ultralytics.com/zh/guides/yolo26-training-recipe/
+model: yolo/cfg/models/26/yolo26-p2-crowd.yaml
+data: train/dataset/crowdhuman-dataset-people-and-faces-19k/data.yaml
+
+# --- 训练 ---
+epochs: 100
 imgsz: 640
-batch: 16
-box: 7.5
-cls: 0.5
-dfl: 1.5
+batch: 8
+
+# --- 优化器 (YOLO26n recipe) ---
+optimizer: MuSGD
+lr0: 0.0054
+lrf: 0.0495
+momentum: 0.947
+weight_decay: 0.00064
+warmup_epochs: 0.98
+
+# --- 损失权重 (YOLO26n recipe) ---
+box: 5.63
+cls: 0.56
+dfl: 9.04
 rep: 0.5
 nwd: 0.3
 nwd_threshold: 1024
+
+# --- 数据增强 (YOLO26n recipe) ---
+mosaic: 0.909
+mixup: 0.012
+copy_paste: 0.075
+scale: 0.562
+fliplr: 0.606
+degrees: 1.11
+shear: 1.46
+translate: 0.071
+hsv_h: 0.014
+hsv_s: 0.645
+hsv_v: 0.566
+bgr: 0.106
+close_mosaic: 10
