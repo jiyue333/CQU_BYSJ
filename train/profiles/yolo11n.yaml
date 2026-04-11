@@ -1,0 +1,5 @@
+# YOLO11n 配置 (覆盖 config.yaml)
+model: models/yolo11n.pt
+name: yolo11n
+batch: 32
+epochs: 100

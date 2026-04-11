@@ -1,0 +1,5 @@
+# YOLO26n 轻量模型配置 (覆盖 config.yaml)
+model: models/yolo26n.pt
+name: yolo26n
+batch: 32                    # 小模型可用更大 batch
+epochs: 150

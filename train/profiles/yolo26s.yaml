@@ -1,0 +1,5 @@
+# YOLO26s 小模型配置 (覆盖 config.yaml)
+model: models/yolo26s.pt
+name: yolo26s
+batch: 16
+epochs: 150

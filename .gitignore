@@ -156,3 +156,6 @@ dataset/*
 .playwright-mcp/
 .DS_Store
 yolo/
+YOLO-CROWD/
+runs/
+train/dataset
