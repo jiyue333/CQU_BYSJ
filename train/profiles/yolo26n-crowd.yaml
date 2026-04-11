@@ -1,0 +1,12 @@
+# YOLO26n crowd detection training profile
+model: yolo/cfg/models/26/yolo26n-p2-crowd.yaml
+data: CrowdHuman.yaml
+epochs: 300
+imgsz: 640
+batch: 16
+box: 7.5
+cls: 0.5
+dfl: 1.5
+rep: 0.5
+nwd: 0.3
+nwd_threshold: 1024

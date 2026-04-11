@@ -109,10 +109,13 @@ class DFLoss(nn.Module):
 class BboxLoss(nn.Module):
     """Criterion class for computing training losses for bounding boxes."""
 
-    def __init__(self, reg_max: int = 16):
+    def __init__(self, reg_max: int = 16, nwd_weight: float = 0.0, nwd_threshold: int = 1024):
         """Initialize the BboxLoss module with regularization maximum and DFL settings."""
         super().__init__()
         self.dfl_loss = DFLoss(reg_max) if reg_max > 1 else None
+        self.nwd_loss = NWDLoss() if nwd_weight > 0 else None
+        self.nwd_weight = nwd_weight
+        self.nwd_threshold = nwd_threshold
 
     def forward(
         self,
@@ -130,6 +133,12 @@ class BboxLoss(nn.Module):
         weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)
         iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False, CIoU=True)
         loss_iou = ((1.0 - iou) * weight).sum() / target_scores_sum
+
+        # NWD loss blending for small targets
+        if self.nwd_loss is not None:
+            nwd_val = self.nwd_loss(pred_bboxes[fg_mask], target_bboxes[fg_mask])
+            loss_nwd = (nwd_val.unsqueeze(-1) * weight).sum() / target_scores_sum
+            loss_iou = loss_iou * (1 - self.nwd_weight) + loss_nwd * self.nwd_weight
 
         # DFL loss
         if self.dfl_loss:
@@ -151,6 +160,80 @@ class BboxLoss(nn.Module):
             loss_dfl = loss_dfl.sum() / target_scores_sum
 
         return loss_iou, loss_dfl
+
+
+class NWDLoss(nn.Module):
+    """Normalized Wasserstein Distance Loss for small target regression."""
+
+    def __init__(self, C=2.0):
+        """Initialize NWDLoss with scaling constant C."""
+        super().__init__()
+        self.C = C
+
+    def forward(self, pred_bboxes, target_bboxes):
+        """Compute NWD loss between predicted and target bounding boxes."""
+        from yolo.utils.metrics import wasserstein_distance
+
+        dist = wasserstein_distance(pred_bboxes, target_bboxes)
+        nwd = torch.exp(-dist / self.C)
+        return 1.0 - nwd
+
+
+class RepulsionLoss(nn.Module):
+    """Repulsion Loss for dense crowd detection — penalizes overlap with non-matched GT."""
+
+    def __init__(self, sigma=0.0):
+        """Initialize RepulsionLoss with smooth L1 beta parameter sigma."""
+        super().__init__()
+        self.sigma = sigma
+
+    def forward(self, pred_bboxes, target_bboxes, target_gt_idx, gt_bboxes, fg_mask):
+        """Compute repulsion loss penalizing overlap with non-assigned GT boxes."""
+        batch_size = pred_bboxes.shape[0]
+        total_loss = pred_bboxes.new_tensor(0.0)
+        num_pos = 0
+        for b in range(batch_size):
+            fg = fg_mask[b]
+            if not fg.any():
+                continue
+            pred_fg = pred_bboxes[b][fg]
+            gt_idx_fg = target_gt_idx[b][fg]
+            all_gt = gt_bboxes[b]
+            valid_gt_mask = all_gt.sum(-1) > 0
+            if valid_gt_mask.sum() < 2:
+                continue
+            iou_matrix = self._batch_iou(pred_fg, all_gt[valid_gt_mask])
+            valid_indices = valid_gt_mask.nonzero(as_tuple=True)[0]
+            for k in range(pred_fg.shape[0]):
+                assigned_gt = gt_idx_fg[k]
+                match = (valid_indices == assigned_gt).nonzero(as_tuple=True)[0]
+                if match.numel() > 0:
+                    iou_matrix[k, match[0]] = -1.0
+            max_iou, _ = iou_matrix.max(dim=1)
+            pos_mask = max_iou > 0
+            if pos_mask.any():
+                if self.sigma > 0:
+                    loss = F.smooth_l1_loss(
+                        max_iou[pos_mask], torch.zeros_like(max_iou[pos_mask]), beta=self.sigma, reduction="sum"
+                    )
+                else:
+                    loss = max_iou[pos_mask].sum()
+                total_loss = total_loss + loss
+                num_pos += pos_mask.sum().item()
+        return total_loss / max(num_pos, 1)
+
+    @staticmethod
+    def _batch_iou(box1, box2):
+        """Compute IoU matrix between box1 (K,4) and box2 (M,4) in xyxy format."""
+        area1 = (box1[:, 2] - box1[:, 0]) * (box1[:, 3] - box1[:, 1])
+        area2 = (box2[:, 2] - box2[:, 0]) * (box2[:, 3] - box2[:, 1])
+        inter_x1 = torch.max(box1[:, None, 0], box2[None, :, 0])
+        inter_y1 = torch.max(box1[:, None, 1], box2[None, :, 1])
+        inter_x2 = torch.min(box1[:, None, 2], box2[None, :, 2])
+        inter_y2 = torch.min(box1[:, None, 3], box2[None, :, 3])
+        inter_area = (inter_x2 - inter_x1).clamp(min=0) * (inter_y2 - inter_y1).clamp(min=0)
+        union_area = area1[:, None] + area2[None, :] - inter_area
+        return inter_area / union_area.clamp(min=1e-6)
 
 
 class RLELoss(nn.Module):
@@ -362,7 +445,10 @@ class v8DetectionLoss:
             stride=self.stride.tolist(),
             topk2=tal_topk2,
         )
-        self.bbox_loss = BboxLoss(m.reg_max).to(device)
+        self.rep_loss = RepulsionLoss() if getattr(h, "rep", 0) > 0 else None
+        nwd_w = getattr(h, "nwd", 0)
+        nwd_t = getattr(h, "nwd_threshold", 1024)
+        self.bbox_loss = BboxLoss(m.reg_max, nwd_weight=nwd_w, nwd_threshold=nwd_t).to(device)
         self.proj = torch.arange(m.reg_max, dtype=torch.float, device=device)
 
     def preprocess(self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:
@@ -446,6 +532,11 @@ class v8DetectionLoss:
                 imgsz,
                 stride_tensor,
             )
+
+            # Repulsion loss (added to box loss component)
+            if self.rep_loss is not None:
+                rep = self.rep_loss(pred_bboxes, target_bboxes, target_gt_idx, gt_bboxes, fg_mask)
+                loss[0] += rep * getattr(self.hyp, "rep", 0.5)
 
         loss[0] *= self.hyp.box  # box gain
         loss[1] *= self.hyp.cls  # cls gain

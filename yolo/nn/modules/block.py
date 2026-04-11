@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -2071,3 +2072,85 @@ class RealNVP(nn.Module):
             self.float()
         z, log_det = self.backward_p(x)
         return self.prior.log_prob(z) + log_det
+
+
+class MCS(nn.Module):
+    """Multi-scale Channel Split attention module for dense crowd detection."""
+
+    def __init__(self, c1, c2, n_scales=4, pool_sizes=(3, 5, 7, 9)):
+        super().__init__()
+        assert c1 % n_scales == 0, f"c1={c1} must be divisible by n_scales={n_scales}"
+        self.n_scales = n_scales
+        c_split = c1 // n_scales
+        self.branches = nn.ModuleList()
+        for ps in pool_sizes[:n_scales]:
+            self.branches.append(nn.Sequential(
+                nn.AdaptiveAvgPool2d(ps),
+                nn.Conv2d(c_split, c_split, 1, bias=False),
+                nn.BatchNorm2d(c_split),
+            ))
+        self.gate = nn.Sequential(
+            nn.Conv2d(c1, c1, 1, bias=False),
+            nn.Sigmoid(),
+        )
+        self.conv_out = Conv(c1, c2, 1) if c1 != c2 else nn.Identity()
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        chunks = x.chunk(self.n_scales, dim=1)
+        outs = []
+        for chunk, branch in zip(chunks, self.branches):
+            out = branch(chunk)
+            out = F.interpolate(out, size=(H, W), mode='bilinear', align_corners=False)
+            outs.append(out)
+        y = torch.cat(outs, dim=1)
+        y = self.gate(y)
+        return self.conv_out(x * y + x)
+
+
+class TridentBlock(nn.Module):
+    """Trident block with shared-weight multi-dilation convolutions and per-branch BN."""
+
+    def __init__(self, c1, c2, shortcut=True, e=0.5, dilations=(1, 2, 3)):
+        super().__init__()
+        c_ = int(c2 * e)
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.shared_weight = nn.Parameter(torch.empty(c_, c_, 3, 3))
+        nn.init.kaiming_uniform_(self.shared_weight, a=math.sqrt(5))
+        self.bns = nn.ModuleList([nn.BatchNorm2d(c_) for _ in dilations])
+        self.act = nn.SiLU(inplace=True)
+        self.cv2 = Conv(c_, c2, 1, 1)
+        self.dilations = dilations
+        self.add = shortcut and c1 == c2
+
+    def forward(self, x):
+        y = self.cv1(x)
+        outs = []
+        for d, bn in zip(self.dilations, self.bns):
+            pad = d
+            out = F.conv2d(y, self.shared_weight, padding=pad, dilation=d)
+            outs.append(self.act(bn(out)))
+        y = sum(outs)
+        y = self.cv2(y)
+        return x + y if self.add else y
+
+
+class RFEM(nn.Module):
+    """Receptive Field Enhancement Module using TridentBlock."""
+
+    def __init__(self, c1, c2, n=1, shortcut=True, e=0.5):
+        super().__init__()
+        self.m = nn.Sequential(*(TridentBlock(c1 if i == 0 else c2, c2, shortcut, e) for i in range(n)))
+
+    def forward(self, x):
+        return self.m(x)
+
+
+class C3k2RFEM(C2f):
+    """C3k2 variant with TridentBlock replacing standard Bottleneck for multi-scale receptive fields."""
+
+    def __init__(self, c1, c2, n=1, c3k=False, e=0.5, g=1, shortcut=True):
+        super().__init__(c1, c2, n, shortcut, g, e)
+        self.m = nn.ModuleList(
+            TridentBlock(self.c, self.c, shortcut, e=1.0) for _ in range(n)
+        )

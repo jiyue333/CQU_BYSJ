@@ -36,6 +36,7 @@ from yolo.nn.modules import (
     C2fPSA,
     C3Ghost,
     C3k2,
+    C3k2RFEM,
     C3x,
     CBFuse,
     CBLinear,
@@ -55,10 +56,12 @@ from yolo.nn.modules import (
     ImagePoolingAttn,
     Index,
     LRPCHead,
+    MCS,
     Pose,
     Pose26,
     RepC3,
     RepConv,
+    RFEM,
     RepNCSPELAN4,
     RepVGGDW,
     ResNetLayer,
@@ -1608,6 +1611,9 @@ def parse_model(d, ch, verbose=True):
             SCDown,
             C2fCIB,
             A2C2f,
+            MCS,
+            RFEM,
+            C3k2RFEM,
         }
     )
     repeat_modules = frozenset(  # modules with 'repeat' arguments
@@ -1627,6 +1633,8 @@ def parse_model(d, ch, verbose=True):
             C2fCIB,
             C2PSA,
             A2C2f,
+            RFEM,
+            C3k2RFEM,
         }
     )
     for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # from, number, module, args
@@ -1655,6 +1663,10 @@ def parse_model(d, ch, verbose=True):
                 args.insert(2, n)  # number of repeats
                 n = 1
             if m is C3k2:  # for M/L/X sizes
+                legacy = False
+                if scale in "mlx":
+                    args[3] = True
+            if m is C3k2RFEM:
                 legacy = False
                 if scale in "mlx":
                     args[3] = True

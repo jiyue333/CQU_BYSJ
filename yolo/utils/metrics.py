@@ -79,6 +79,29 @@ def box_iou(box1: torch.Tensor, box2: torch.Tensor, eps: float = 1e-7) -> torch.
     return inter / ((a2 - a1).prod(2) + (b2 - b1).prod(2) - inter + eps)
 
 
+def wasserstein_distance(box1, box2):
+    """Compute squared 2-Wasserstein distance between two sets of boxes modeled as 2D Gaussians.
+
+    Args:
+        box1 (Tensor): (N, 4) boxes in xyxy format.
+        box2 (Tensor): (N, 4) boxes in xyxy format.
+
+    Returns:
+        Tensor: (N,) squared Wasserstein distances.
+    """
+    cx1 = (box1[:, 0] + box1[:, 2]) / 2
+    cy1 = (box1[:, 1] + box1[:, 3]) / 2
+    w1 = (box1[:, 2] - box1[:, 0]).clamp(min=1e-6)
+    h1 = (box1[:, 3] - box1[:, 1]).clamp(min=1e-6)
+    cx2 = (box2[:, 0] + box2[:, 2]) / 2
+    cy2 = (box2[:, 1] + box2[:, 3]) / 2
+    w2 = (box2[:, 2] - box2[:, 0]).clamp(min=1e-6)
+    h2 = (box2[:, 3] - box2[:, 1]).clamp(min=1e-6)
+    center_dist = (cx1 - cx2).pow(2) + (cy1 - cy2).pow(2)
+    size_dist = ((w1 - w2).pow(2) + (h1 - h2).pow(2)) / 4
+    return center_dist + size_dist
+
+
 def bbox_iou(
     box1: torch.Tensor,
     box2: torch.Tensor,
