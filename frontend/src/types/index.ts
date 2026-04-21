@@ -23,6 +23,7 @@ export interface VideoSource {
   video_height?: number | null;
   video_fps?: number | null;
   total_frames?: number | null;
+  scene_area_m2?: number | null;
   created_at: string;
 }
 
@@ -54,6 +55,7 @@ export interface Region {
   count_critical?: number | null;
   density_warning?: number | null;
   density_critical?: number | null;
+  max_capacity?: number | null;
 }
 
 export interface RegionListResponse {
@@ -98,12 +100,21 @@ export interface RegionHistoryStats {
   total_density_avg: number;
 }
 
+export interface CrossLineHistoryStats {
+  name: string;
+  in_total: number;
+  out_total: number;
+}
+
 export interface HistorySeriesItem {
   time: string;
   total_count_avg: number;
   total_count_max: number;
   total_count_min: number;
   total_density_avg: number;
+  crossline_in_total: number;
+  crossline_out_total: number;
+  crossline_stats: Record<string, CrossLineHistoryStats>;
   regions: Record<string, RegionHistoryStats>;
 }
 
@@ -118,13 +129,41 @@ export interface RegionRealtimeStats {
   total_density_avg: number;
 }
 
+export interface CrossLineRealtimeStats {
+  name: string;
+  in_count: number;
+  out_count: number;
+  net_flow: number;
+}
+
 export interface RealtimeFrame {
   ts: string;
   frame: string;
   total_count: number;
   total_density: number;
+  dm_count_estimate: number;
   regions: Record<string, RegionRealtimeStats>;
-  entry_speed: number;
+  crossline_in_count: number;
+  crossline_out_count: number;
+  crossline_stats: Record<string, CrossLineRealtimeStats>;
+  crossline_counted_ids: number[];
+  density_matrix: number[][];
+}
+
+export interface CrossLine {
+  line_id: string;
+  source_id: string;
+  name: string;
+  start_x: number;
+  start_y: number;
+  end_x: number;
+  end_y: number;
+  direction: string;
+  color: string;
+}
+
+export interface CrossLineListResponse {
+  lines: CrossLine[];
 }
 
 export interface AlertSocketMessage {

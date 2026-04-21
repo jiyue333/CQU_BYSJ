@@ -22,6 +22,10 @@ export default defineConfig({
         target: apiTarget,
         changeOrigin: true,
         ws: true
+      },
+      '/downloads': {
+        target: apiTarget,
+        changeOrigin: true
       }
     }
   }

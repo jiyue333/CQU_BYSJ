@@ -86,12 +86,19 @@ class AlertService:
         """设置区域阈值配置"""
         self._region_configs = {c.region_name: c for c in configs}
 
-    def check(self, result: DetectionResult) -> list[Alert]:
+    def check(
+        self,
+        result: DetectionResult,
+        dm_region_counts: dict[str, float] | None = None,
+        dm_region_densities: dict[str, float] | None = None,
+    ) -> list[Alert]:
         """
         检查检测结果是否触发告警
 
         Args:
-            result: 检测结果
+            result: YOLO 检测结果
+            dm_region_counts: DM-Count 区域人数（优先使用）
+            dm_region_densities: DM-Count 区域密度（优先使用）
 
         Returns:
             触发的告警列表（可能为空）
@@ -99,9 +106,12 @@ class AlertService:
         alerts: list[Alert] = []
         now = datetime.now()
 
-        # 检查各区域人数和密度
-        for region_name, count in result.region_counts.items():
-            density = result.region_densities.get(region_name, 0.0)
+        # 优先使用 DM-Count 的区域数据，回退到 YOLO
+        region_counts = dm_region_counts if dm_region_counts else result.region_counts
+
+        # 检查各区域人数
+        for region_name, count in region_counts.items():
+            density = (dm_region_densities or {}).get(region_name, 0.0)
 
             # 获取该区域的阈值配置
             config = self._region_configs.get(region_name)

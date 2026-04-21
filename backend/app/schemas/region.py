@@ -21,6 +21,7 @@ class RegionCreate(BaseModel):
     count_critical: Optional[int] = Field(default=None, description="人数严重阈值")
     density_warning: Optional[float] = Field(default=None, description="密度警告阈值")
     density_critical: Optional[float] = Field(default=None, description="密度严重阈值")
+    max_capacity: Optional[int] = Field(default=None, description="最大容量（人）")
 
 
 class RegionUpdate(BaseModel):
@@ -34,6 +35,7 @@ class RegionUpdate(BaseModel):
     count_critical: Optional[int] = Field(default=None, description="人数严重阈值")
     density_warning: Optional[float] = Field(default=None, description="密度警告阈值")
     density_critical: Optional[float] = Field(default=None, description="密度严重阈值")
+    max_capacity: Optional[int] = Field(default=None, description="最大容量（人）")
 
 
 class RegionResponse(BaseModel):
@@ -50,6 +52,7 @@ class RegionResponse(BaseModel):
     count_critical: Optional[int] = Field(default=None, description="人数严重阈值")
     density_warning: Optional[float] = Field(default=None, description="密度警告阈值（人/m²）")
     density_critical: Optional[float] = Field(default=None, description="密度严重阈值（人/m²）")
+    max_capacity: Optional[int] = Field(default=None, description="最大容量（人）")
 
     model_config = {"from_attributes": True}
 

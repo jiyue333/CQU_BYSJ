@@ -2,7 +2,7 @@
 分析控制 API
 
 处理分析任务的启动、停止和状态查询
-推理循环在 API 层编排
+推理循环在 API 层编排：DM-Count（降频）+ YOLO（每帧）
 """
 
 import asyncio
@@ -10,11 +10,11 @@ import base64
 import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from functools import partial
 from pathlib import Path
 from typing import Optional
 
 import cv2
+import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -27,6 +27,7 @@ from app.repositories import (
     RegionRepository,
     AlertRepository,
 )
+from app.repositories.cross_line_repository import CrossLineRepository
 from app.schemas.common import ApiResponse, OkResponse
 from app.schemas.analysis import (
     AnalysisStartRequest,
@@ -36,11 +37,11 @@ from app.schemas.analysis import (
 )
 from app.services.video import VideoService
 from app.services.detection import YOLOService, DetectionResult
-from app.services.vlm import VLMAreaEstimator
+from app.services.density import DMCountService
 from app.services.alert import AlertService, RegionThresholdConfig
-from app.services.stats import stats_aggregator, FrameStats, RegionFrameStats
+from app.services.stats import stats_aggregator, CrossLineFrameStats, FrameStats, RegionFrameStats
 from app.api.endpoints.websocket import ws_manager
-from app.schemas.websocket import RealtimeFrame, RegionRealtimeStats, AlertMessage
+from app.schemas.websocket import AlertMessage, CrossLineRealtimeStats, RealtimeFrame, RegionRealtimeStats
 
 router = APIRouter(prefix="/analysis", tags=["分析控制"])
 
@@ -50,31 +51,46 @@ _analysis_state: dict[str, dict] = {}
 # 异步任务集合
 _tasks: dict[str, asyncio.Task] = {}
 
-# 线程池用于 CPU 密集型推理
-_executor = ThreadPoolExecutor(max_workers=4)
+# 线程池：YOLO 和 DM-Count 分开
+_yolo_executor = ThreadPoolExecutor(max_workers=2)
+_dmcount_executor = ThreadPoolExecutor(max_workers=1)
 
 # 参考帧目录
 _REF_FRAMES_DIR = Path(settings.DATA_DIR) / "ref_frames"
 
 
+def _dmcount_region_counts(
+    density_map: np.ndarray,
+    regions_dict: dict[str, list[tuple]],
+    img_width: int,
+    img_height: int,
+) -> dict[str, float]:
+    """在密度图上按区域多边形求和，得到每个区域的 DM-Count 人数"""
+    dm_h, dm_w = density_map.shape[:2]
+    result: dict[str, float] = {}
+    for name, pixel_points in regions_dict.items():
+        # 将像素坐标映射到密度图尺寸
+        pts = np.array(
+            [
+                [p[0] * dm_w / img_width, p[1] * dm_h / img_height]
+                for p in pixel_points
+            ],
+            dtype=np.int32,
+        )
+        mask = np.zeros((dm_h, dm_w), dtype=np.uint8)
+        cv2.fillPoly(mask, [pts], 1)
+        region_count = float(np.sum(density_map * mask))
+        result[name] = region_count
+    return result
+
+
 def _get_regions_dict(regions: list, img_width: int = 0, img_height: int = 0) -> dict[str, list[tuple]]:
-    """
-    将数据库区域转换为 YOLO 服务需要的格式
-
-    Args:
-        regions: 区域配置列表
-        img_width: 图像宽度（用于将百分比坐标转换为像素坐标）
-        img_height: 图像高度
-
-    Returns:
-        区域字典 {name: [(x1,y1), (x2,y2), ...]}
-    """
+    """将数据库区域转换为 YOLO 服务需要的格式"""
     result = {}
     for region in regions:
         if region.points:
             try:
                 points = json.loads(region.points) if isinstance(region.points, str) else region.points
-                # 如果提供了图像尺寸，将百分比坐标转换为像素坐标
                 if img_width > 0 and img_height > 0:
                     converted_points = []
                     for p in points:
@@ -89,22 +105,49 @@ def _get_regions_dict(regions: list, img_width: int = 0, img_height: int = 0) ->
     return result
 
 
+def _get_crosslines_config(crosslines: list, img_width: int, img_height: int) -> list[dict]:
+    """将数据库 cross-line 转换为 YOLO ObjectCounter 需要的格式。
+
+    2 点线段自动扩展为薄矩形检测带（上下各 BAND 像素），
+    解决追踪 ID 不稳定时 LineString.intersects 无法检测穿越的问题。
+    """
+    BAND = 25  # 检测带半宽（像素）
+    result = []
+    for cl in crosslines:
+        x1 = int(cl.start_x * img_width / 100.0)
+        y1 = int(cl.start_y * img_height / 100.0)
+        x2 = int(cl.end_x * img_width / 100.0)
+        y2 = int(cl.end_y * img_height / 100.0)
+        # 计算线段法向量，沿法向扩展为薄矩形
+        dx = x2 - x1
+        dy = y2 - y1
+        length = max(1, (dx * dx + dy * dy) ** 0.5)
+        nx = -dy / length * BAND  # 法向 x
+        ny = dx / length * BAND   # 法向 y
+        region = [
+            (int(x1 + nx), int(y1 + ny)),
+            (int(x2 + nx), int(y2 + ny)),
+            (int(x2 - nx), int(y2 - ny)),
+            (int(x1 - nx), int(y1 - ny)),
+        ]
+        result.append({
+            "line_id": cl.line_id,
+            "name": cl.name,
+            "line": [(x1, y1), (x2, y2)],  # 原始线段（用于画线）
+            "region": region,               # 薄矩形（用于 ObjectCounter）
+            "direction": cl.direction,
+            "color": cl.color,
+        })
+    return result
+
+
 def _get_region_id_map(regions: list) -> dict[str, str]:
     """构建区域名称到 ID 的映射"""
     return {region.name: region.region_id for region in regions}
 
 
-def save_reference_frame(source_id: str, frame: "np.ndarray") -> Path:
-    """
-    保存参考帧到磁盘，供区域 API 后续使用
-
-    Args:
-        source_id: 数据源 ID
-        frame: BGR 图像帧
-
-    Returns:
-        参考帧文件路径
-    """
+def save_reference_frame(source_id: str, frame: np.ndarray) -> Path:
+    """保存参考帧到磁盘"""
     _REF_FRAMES_DIR.mkdir(parents=True, exist_ok=True)
     ref_path = _REF_FRAMES_DIR / f"{source_id}.jpg"
     cv2.imwrite(str(ref_path), frame)
@@ -112,16 +155,8 @@ def save_reference_frame(source_id: str, frame: "np.ndarray") -> Path:
     return ref_path
 
 
-def load_reference_frame(source_id: str) -> Optional["np.ndarray"]:
-    """
-    从磁盘加载参考帧
-
-    Args:
-        source_id: 数据源 ID
-
-    Returns:
-        BGR 图像帧，或 None（如果不存在）
-    """
+def load_reference_frame(source_id: str) -> Optional[np.ndarray]:
+    """从磁盘加载参考帧"""
     ref_path = _REF_FRAMES_DIR / f"{source_id}.jpg"
     if ref_path.exists():
         frame = cv2.imread(str(ref_path))
@@ -132,14 +167,12 @@ def load_reference_frame(source_id: str) -> Optional["np.ndarray"]:
 
 async def _inference_loop(source_id: str) -> None:
     """
-    推理循环主函数
-
-    Args:
-        source_id: 数据源 ID
+    推理循环主函数 — 双模型协同：
+    - YOLO: 每帧运行（追踪 + 区域计数 + cross-line）
+    - DM-Count: 每 N 帧运行（密度图 + 人数估计）
     """
     logger.info(f"推理循环启动: {source_id}")
 
-    # 创建独立的数据库会话
     db = SessionLocal()
 
     try:
@@ -150,13 +183,12 @@ async def _inference_loop(source_id: str) -> None:
             logger.error(f"数据源不存在: {source_id}")
             return
 
-        # 确定视频路径
         video_path = source.file_path or source.stream_url
         if not video_path:
             logger.error(f"数据源无有效路径: {source_id}")
             return
 
-        # 2. 先打开视频源获取尺寸信息
+        # 2. 打开视频源
         video_service = VideoService(video_path)
         if not video_service.open():
             logger.error(f"无法打开视频源: {video_path}")
@@ -166,47 +198,42 @@ async def _inference_loop(source_id: str) -> None:
         video_info = video_service.get_info()
         frame_interval = 1.0 / video_info.fps if video_info.fps > 0 else 1.0 / 30.0
 
-        logger.info(f"视频源已打开: {video_path}, 尺寸={video_info.width}x{video_info.height}, FPS={video_info.fps}")
+        logger.info(f"视频源已打开: {video_path}, {video_info.width}x{video_info.height}, FPS={video_info.fps}")
 
-        # 3. 截取参考帧（用 cap.read() 避免消耗 generator）
+        # 流源首次连接时回填视频元数据
+        if source.source_type == "stream" and not source.video_width:
+            source.video_width = video_info.width
+            source.video_height = video_info.height
+            source.video_fps = video_info.fps
+            db.commit()
+
+        # 3. 截取参考帧
         ret, first_frame = video_service.cap.read()
         if not ret:
             logger.error(f"无法读取第一帧: {source_id}")
             source_repo.update_status(source_id, "error")
             return
-
-        # 重置视频位置到开头
-        video_service.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-
-        # 保存参考帧（供区域 API 后续使用）
         save_reference_frame(source_id, first_frame)
+        # 文件源：回到起始帧；流源：不支持 seek，继续读取即可
+        is_stream = video_service.source_type.value == "stream"
+        if not is_stream:
+            video_service.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
-        # 4. 获取区域配置并转换为像素坐标
+        # 4. 获取区域配置
         region_repo = RegionRepository(db)
         regions = region_repo.get_by_source_id(source_id)
         regions_dict = _get_regions_dict(regions, video_info.width, video_info.height)
         region_id_map = _get_region_id_map(regions)
 
+        # 5. 获取 Cross-line 配置
+        crossline_repo = CrossLineRepository(db)
+        crosslines_db = crossline_repo.get_by_source_id(source_id)
+        crosslines_config = _get_crosslines_config(crosslines_db, video_info.width, video_info.height)
+
         logger.info(f"区域配置: {list(regions_dict.keys()) if regions_dict else '无'}")
+        logger.info(f"Cross-line 配置: {len(crosslines_config)} 条线段")
 
-        # 5. VLM 面积估算（仅在有区域配置时）
-        physical_areas: dict[str, float] = {}
-        if regions_dict:
-            logger.info("[VLM] 开始估算区域物理面积...")
-            estimator = VLMAreaEstimator()
-            physical_areas = await estimator.estimate_areas(first_frame, regions_dict)
-
-            # 更新数据库中各区域的 area_physical
-            for region in regions:
-                if region.name in physical_areas:
-                    region_repo.update(region, area_physical=physical_areas[region.name])
-
-            if physical_areas:
-                logger.info(f"[VLM] 面积估算完成: {physical_areas}")
-            else:
-                logger.warning("[VLM] 面积估算未返回结果，密度将不可用")
-
-        # 6. 构建区域阈值配置（从 Region 表读取）
+        # 6. 构建区域阈值配置
         region_threshold_configs = []
         for region in regions:
             region_threshold_configs.append(RegionThresholdConfig(
@@ -218,55 +245,108 @@ async def _inference_loop(source_id: str) -> None:
             ))
 
         # 7. 初始化服务
+        yolo_classes = [int(c.strip()) for c in settings.YOLO_CLASSES.split(",") if c.strip()]
         yolo_service = YOLOService(
             model_path=settings.YOLO_MODEL_PATH,
             regions=regions_dict if regions_dict else None,
+            crosslines=crosslines_config if crosslines_config else None,
             conf=settings.YOLO_CONF_THRESHOLD,
             device=settings.YOLO_DEVICE,
-            region_physical_areas=physical_areas,
+            classes=yolo_classes,
+        )
+        dmcount_service = DMCountService(
+            model_name=settings.DMCOUNT_MODEL_NAME,
+            model_weights=settings.DMCOUNT_MODEL_WEIGHTS,
         )
         alert_service = AlertService(cooldown_seconds=settings.ALERT_COOLDOWN_SECONDS)
         alert_service.set_region_thresholds(region_threshold_configs)
         alert_repo = AlertRepository(db)
 
         # 8. 推理循环
+        # 架构：YOLO 每帧静默运行（追踪+计数），DM-Count 按间隔运行（密度+渲染+推送）
         frame_count = 0
         last_flush_time = datetime.utcnow()
+        last_dmcount_time = 0.0  # 上次 DM-Count 运行的 wall time
+        last_source_refresh = datetime.utcnow()
         loop = asyncio.get_event_loop()
+
+        # DM-Count 状态缓存
+        dmcount_interval_sec = settings.DMCOUNT_INTERVAL_SEC
+        cached_density_map: np.ndarray | None = None
+        cached_dm_count: float = 0.0
+        cached_heatmap_frame: np.ndarray | None = None
+        cached_region_dm_counts: dict[str, float] = {}
+
+        # 解析 YOLO 检测类别
+        yolo_classes = [int(c.strip()) for c in settings.YOLO_CLASSES.split(",") if c.strip()]
+        logger.info(f"YOLO 检测类别: {yolo_classes}, DM-Count 间隔: {dmcount_interval_sec}s")
+
+        # 帧率控制
+        is_stream = video_service.source_type.value == "stream"
 
         try:
             for frame in video_service.frames():
-                frame_start_time = asyncio.get_event_loop().time()
+                frame_wall_time = loop.time()
 
-                # 检查任务是否被取消
                 if asyncio.current_task().cancelled():
                     break
+
+                # 流源：丢弃缓冲区旧帧，始终处理最新帧
+                if is_stream and video_service.cap:
+                    for _ in range(3):
+                        if video_service.cap.grab():
+                            ret, latest = video_service.cap.retrieve()
+                            if ret:
+                                frame = latest
 
                 frame_count += 1
                 now = datetime.utcnow()
                 timestamp = now.isoformat() + "Z"
 
-                # YOLO 推理（在线程池中执行，避免阻塞事件循环）
+                # === YOLO: 每帧静默运行（追踪 + 区域计数 + 计数线）===
                 result: DetectionResult = await loop.run_in_executor(
-                    _executor, yolo_service.process, frame
+                    _yolo_executor, yolo_service.process, frame
                 )
 
-                # 构建各区域帧统计（确保所有配置的区域都返回，即使人数为0）
-                region_frame_stats = []
-                for region_name in regions_dict.keys():
-                    count = result.region_counts.get(region_name, 0)
-                    density = result.region_densities.get(region_name, 0.0)
-                    region_frame_stats.append(RegionFrameStats(
-                        region_id=region_id_map.get(region_name, ""),
-                        name=region_name,
-                        count=count,
-                        density=density,
-                    ))
+                # === DM-Count: 按时间间隔运行（密度估计 + 热力图渲染）===
+                should_render = (frame_wall_time - last_dmcount_time) >= dmcount_interval_sec
+                if should_render or cached_density_map is None:
+                    try:
+                        density_map, dm_count = await loop.run_in_executor(
+                            _dmcount_executor, dmcount_service.predict, frame
+                        )
+                        cached_density_map = density_map
+                        cached_dm_count = dm_count
+                        cached_heatmap_frame = dmcount_service.render_heatmap(frame, density_map)
+                        if regions_dict:
+                            cached_region_dm_counts = _dmcount_region_counts(
+                                density_map, regions_dict, video_info.width, video_info.height
+                            )
+                        last_dmcount_time = loop.time()
+                    except Exception as e:
+                        logger.warning(f"[DMCount] 推理异常: {e}")
+                        should_render = False  # 失败时不推送
 
-                # 告警检查
-                alerts = alert_service.check(result)
+                # === 告警检查（使用 DM-Count 数据，每帧检查）===
+                dm_counts_for_alert = {name: cached_region_dm_counts.get(name, 0.0) for name in regions_dict}
+                dm_densities_for_alert: dict[str, float] = {}
+                # 定期刷新 source（支持运行中修改面积）
+                if (now - last_source_refresh).total_seconds() >= 5:
+                    db.refresh(source)
+                    last_source_refresh = now
+                scene_area = source.scene_area_m2 or 0.0
+                total_px = video_info.width * video_info.height if video_info.width and video_info.height else 1
+                for rname, ppoly in regions_dict.items():
+                    rpx = cv2.contourArea(np.array(ppoly, dtype=np.float32))
+                    ratio = rpx / total_px if total_px > 0 else 1.0
+                    area_m2 = scene_area * ratio if scene_area > 0 else 0.0
+                    dm_densities_for_alert[rname] = (
+                        cached_region_dm_counts.get(rname, 0.0) / area_m2 if area_m2 > 0 else 0.0
+                    )
+                alerts = alert_service.check(result, dm_counts_for_alert, dm_densities_for_alert)
                 for alert in alerts:
-                    # 保存到数据库
+                    alert_val = int(round(alert.current_value))
+                    alert_th = int(round(alert.threshold))
                     alert_model = AlertModel(
                         alert_id=alert.alert_id,
                         source_id=source_id,
@@ -274,88 +354,143 @@ async def _inference_loop(source_id: str) -> None:
                         level=alert.level.value,
                         region_id=region_id_map.get(alert.region_name) if alert.region_name else None,
                         region_name=alert.region_name,
-                        current_value=alert.current_value,
-                        threshold=alert.threshold,
+                        current_value=alert_val,
+                        threshold=alert_th,
                         timestamp=timestamp,
-                        message=f"{'总人数' if alert.alert_type.value == 'total_count' else alert.region_name}达到{alert.level.value}阈值: {alert.current_value}/{alert.threshold}",
+                        message=f"{'总人数' if alert.alert_type.value == 'total_count' else alert.region_name}"
+                                f"达到{alert.level.value}阈值: {alert_val}/{alert_th}",
                     )
-                    alert_repo.create(alert_model)
-                    logger.info(f"告警已保存: {alert.alert_type.value} - {alert.level.value}")
-
-                    # WebSocket 推送告警
+                    try:
+                        alert_repo.create(alert_model)
+                    except Exception:
+                        db.rollback()
+                        logger.exception("告警写入失败，已跳过该条告警: %s", alert.alert_type.value)
+                        continue
                     alert_msg = AlertMessage(
                         alert_id=alert.alert_id,
                         alert_type=alert.alert_type.value,
                         level=alert.level.value,
                         region_id=region_id_map.get(alert.region_name) if alert.region_name else None,
                         region_name=alert.region_name,
-                        current_value=alert.current_value,
-                        threshold=alert.threshold,
+                        current_value=alert_val,
+                        threshold=alert_th,
                         timestamp=timestamp,
                         message=alert_model.message or "",
                     )
                     await ws_manager.send_alert(source_id, alert_msg)
 
-                # 统计聚合
+                # === 统计聚合（每帧收集，使用 DM-Count 缓存）===
+                total_density = cached_dm_count / scene_area if scene_area > 0 else 0.0
+                region_frame_stats = []
+                for region_name, pixel_points in regions_dict.items():
+                    dm_region_count = cached_region_dm_counts.get(region_name, 0.0)
+                    region_pixel_area = cv2.contourArea(np.array(pixel_points, dtype=np.float32))
+                    region_ratio = region_pixel_area / total_px if total_px > 0 else 1.0
+                    region_area_m2 = scene_area * region_ratio if scene_area > 0 else 0.0
+                    region_density = dm_region_count / region_area_m2 if region_area_m2 > 0 else 0.0
+                    region_frame_stats.append(RegionFrameStats(
+                        region_id=region_id_map.get(region_name, ""),
+                        name=region_name,
+                        count=int(round(dm_region_count)),
+                        density=round(region_density, 2),
+                    ))
+
                 frame_stats = FrameStats(
                     source_id=source_id,
                     timestamp=timestamp,
-                    total_count=result.total_count,
-                    total_density=result.total_density,
+                    total_count=int(round(cached_dm_count)),
+                    total_density=round(total_density, 2),
                     regions=region_frame_stats,
+                    crosslines=[
+                        CrossLineFrameStats(
+                            line_id=line_id,
+                            name=str(stats.get("name", line_id)),
+                            in_count=int(stats.get("in_count", 0)),
+                            out_count=int(stats.get("out_count", 0)),
+                        )
+                        for line_id, stats in result.crossline_stats.items()
+                    ],
+                    crossline_in_count=result.crossline_in_count,
+                    crossline_out_count=result.crossline_out_count,
+                    dm_count_estimate=cached_dm_count,
                 )
                 stats_aggregator.collect(frame_stats)
 
-                # 每分钟刷新一次聚合数据到数据库
                 if (now - last_flush_time).total_seconds() >= 60:
                     stats_aggregator.flush(db)
                     last_flush_time = now
 
-                # 编码帧为 base64（用于 WebSocket）
-                _, buffer = cv2.imencode(".jpg", result.frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-                frame_base64 = base64.b64encode(buffer).decode("utf-8")
+                # === WebSocket 推送（仅 DM-Count 触发时推送画面）===
+                if should_render and cached_heatmap_frame is not None:
+                    # 合成输出帧：热力图 + 区域标注 + 计数线
+                    output_frame = cached_heatmap_frame.copy()
+                    if regions_dict:
+                        output_frame = yolo_service._draw_regions(output_frame, result.region_counts)
+                    else:
+                        output_frame = yolo_service._draw_total_count(output_frame, result.total_count)
+                    if yolo_service.crosslines:
+                        output_frame = yolo_service._draw_crosslines(output_frame)
 
-                # 构造区域实时统计（简化版，仅当前帧数据）
-                regions_realtime: dict[str, RegionRealtimeStats] = {}
-                for rf in region_frame_stats:
-                    regions_realtime[rf.region_id] = RegionRealtimeStats(
-                        total_count_avg=float(rf.count),
-                        total_count_max=rf.count,
-                        total_count_min=rf.count,
-                        total_density_avg=rf.density,
+                    _, buffer = cv2.imencode(".jpg", output_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    frame_base64 = base64.b64encode(buffer).decode("utf-8")
+
+                    regions_realtime: dict[str, RegionRealtimeStats] = {}
+                    for rf in region_frame_stats:
+                        regions_realtime[rf.region_id] = RegionRealtimeStats(
+                            total_count_avg=float(rf.count),
+                            total_count_max=rf.count,
+                            total_count_min=rf.count,
+                            total_density_avg=rf.density,
+                        )
+
+                    crosslines_realtime = {
+                        line_id: CrossLineRealtimeStats(
+                            name=str(stats.get("name", line_id)),
+                            in_count=int(stats.get("in_count", 0)),
+                            out_count=int(stats.get("out_count", 0)),
+                            net_flow=int(stats.get("net_flow", 0)),
+                        )
+                        for line_id, stats in result.crossline_stats.items()
+                    }
+
+                    density_matrix_list: list[list[float]] = []
+                    if cached_density_map is not None:
+                        dm_small = cv2.resize(cached_density_map.astype(float), (80, 60))
+                        density_matrix_list = dm_small.tolist()
+
+                    realtime_frame = RealtimeFrame(
+                        ts=timestamp,
+                        frame=frame_base64,
+                        total_count=int(round(cached_dm_count)),
+                        total_density=total_density,
+                        dm_count_estimate=cached_dm_count,
+                        regions=regions_realtime,
+                        crossline_in_count=result.crossline_in_count,
+                        crossline_out_count=result.crossline_out_count,
+                        crossline_stats=crosslines_realtime,
+                        crossline_counted_ids=result.crossline_counted_ids[-20:],
+                        density_matrix=density_matrix_list,
                     )
+                    await ws_manager.send_frame(source_id, realtime_frame)
 
-                # WebSocket 推送实时帧
-                realtime_frame = RealtimeFrame(
-                    ts=timestamp,
-                    frame=frame_base64,
-                    total_count=result.total_count,
-                    total_density=result.total_density,
-                    regions=regions_realtime,
-                    entry_speed=0.0,  # TODO: 计算入场速度
-                )
-                await ws_manager.send_frame(source_id, realtime_frame)
-
-                # 控制帧率（扣除已消耗的时间）
-                elapsed = asyncio.get_event_loop().time() - frame_start_time
-                sleep_time = max(0, frame_interval - elapsed)
-                if sleep_time > 0:
-                    await asyncio.sleep(sleep_time)
+                # 文件源帧率控制（流源不需要，自然按摄像头速率读取）
+                if not is_stream:
+                    elapsed = loop.time() - frame_wall_time
+                    sleep_time = max(0, frame_interval - elapsed)
+                    if sleep_time > 0:
+                        await asyncio.sleep(sleep_time)
 
         except asyncio.CancelledError:
             logger.info(f"推理任务被取消: {source_id}")
             raise
         finally:
             video_service.close()
-
-            # 最后刷新一次统计数据
             stats_aggregator.flush(db)
 
     except asyncio.CancelledError:
         logger.info(f"推理循环已停止: {source_id}")
     except Exception as e:
         logger.exception(f"推理循环异常: {source_id}, {e}")
-        # 更新状态为错误
         try:
             source_repo = VideoSourceRepository(db)
             source_repo.update_status(source_id, "error")
@@ -363,15 +498,10 @@ async def _inference_loop(source_id: str) -> None:
             pass
     finally:
         db.close()
-
-        # 清理任务引用
         if source_id in _tasks:
             del _tasks[source_id]
-
-        # 更新状态
         if source_id in _analysis_state:
             _analysis_state[source_id]["status"] = "stopped"
-
         logger.info(f"推理循环结束: {source_id}")
 
 
@@ -387,20 +517,16 @@ async def start_analysis(
     if not source:
         raise HTTPException(status_code=404, detail="数据源不存在")
 
-    # 检查是否已有运行中的任务
     if request.source_id in _tasks and not _tasks[request.source_id].done():
         raise HTTPException(status_code=400, detail="分析任务已在运行中")
 
-    # 更新数据源状态
     source_repo.update_status(request.source_id, "running")
 
-    # 记录分析状态
     _analysis_state[request.source_id] = {
         "status": "running",
         "start_time": datetime.utcnow().isoformat() + "Z",
     }
 
-    # 创建并启动推理任务
     task = asyncio.create_task(_inference_loop(request.source_id))
     _tasks[request.source_id] = task
 
@@ -423,7 +549,6 @@ async def stop_analysis(
     if not source:
         raise HTTPException(status_code=404, detail="数据源不存在")
 
-    # 取消推理任务
     task = _tasks.get(request.source_id)
     if task:
         if not task.done():
@@ -432,13 +557,10 @@ async def stop_analysis(
                 await task
             except asyncio.CancelledError:
                 pass
-        # 任务可能在 finally 中已删除自己，用 pop 避免 KeyError
         _tasks.pop(request.source_id, None)
 
-    # 更新状态
     source_repo.update_status(request.source_id, "stopped")
 
-    # 清除分析状态
     if request.source_id in _analysis_state:
         _analysis_state[request.source_id]["status"] = "stopped"
 

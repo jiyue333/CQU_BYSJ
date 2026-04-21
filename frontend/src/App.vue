@@ -1,5 +1,5 @@
 <template>
-  <div class="console-shell">
+  <div class="console-shell" :class="{ 'is-fullscreen': isFullscreen }">
     <aside class="nav-rail">
       <button class="brand-lockup" type="button" @click="scrollToSection('overview')">
         <span class="brand-lockup__mark">
@@ -37,13 +37,13 @@
             <IconSymbol name="spark" :size="16" />
             <span>{{ systemStatusLabel }}</span>
           </div>
-          <div class="status-chip">
-            <IconSymbol name="clock" :size="16" />
-            <span>{{ nowLabel }}</span>
-          </div>
           <button class="button button--soft" type="button" @click="refreshDashboard">
             <IconSymbol name="refresh" :size="16" />
             <span>刷新</span>
+          </button>
+          <button class="button button--soft" type="button" @click="isFullscreen = !isFullscreen">
+            <IconSymbol name="overview" :size="16" />
+            <span>{{ isFullscreen ? "退出全屏" : "全屏" }}</span>
           </button>
           <button class="button button--primary" type="button" @click="openConfigCenter()">
             <IconSymbol name="sliders" :size="16" />
@@ -54,40 +54,61 @@
 
       <main class="workspace-content">
         <section ref="overviewSection" class="section-block">
-          <div class="hero-grid">
-            <article class="panel panel--hero">
-              <div class="panel-head">
-                <div>
-                  <h3>{{ selectedSource?.name || "未接入数据源" }}</h3>
-                </div>
-                <div class="panel-head__actions panel-head__actions--hero">
-                  <button class="source-trigger" type="button" @click="openSourcePicker">
-                    <span class="source-trigger__main">
-                      <span class="source-trigger__icon">
-                        <IconSymbol :name="selectedSource?.source_type === 'stream' ? 'camera' : 'film'" :size="16" />
-                      </span>
-                      <span class="source-trigger__copy">
-                        <strong>{{ selectedSource?.name || (sources.length ? "选择数据源" : "暂无数据源") }}</strong>
-                      </span>
-                    </span>
-                    <IconSymbol name="chevron-down" :size="16" />
-                  </button>
-                  <button class="button button--ghost button--tiny" type="button" @click="openSourceModal('stream')">
-                    <IconSymbol name="plus" :size="16" />
-                    <span>新增</span>
-                  </button>
-                  <button
-                    class="button button--ghost"
-                    type="button"
-                    :disabled="!selectedSource"
-                    @click="openExportModal('history')"
-                  >
-                    <IconSymbol name="export" :size="16" />
-                    <span>导出</span>
-                  </button>
-                </div>
-              </div>
+          <div class="overview-header">
+            <div class="overview-header__source">
+              <button class="source-trigger" type="button" @click="openSourcePicker">
+                <span class="source-trigger__main">
+                  <span class="source-trigger__icon">
+                    <IconSymbol :name="selectedSource?.source_type === 'stream' ? 'camera' : 'film'" :size="16" />
+                  </span>
+                  <span class="source-trigger__copy">
+                    <strong>{{ selectedSource?.name || (sources.length ? "选择数据源" : "暂无数据源") }}</strong>
+                  </span>
+                </span>
+                <IconSymbol name="chevron-down" :size="16" />
+              </button>
+              <button class="button button--ghost button--tiny" type="button" @click="openSourceModal('stream')">
+                <IconSymbol name="plus" :size="16" />
+                <span>新增</span>
+              </button>
+            </div>
+            <div class="overview-header__actions">
+              <button
+                class="button button--primary"
+                type="button"
+                :disabled="!selectedSource || busy.analysis"
+                @click="startAnalysis"
+              >
+                <IconSymbol name="play" :size="16" />
+                <span>{{ busy.analysis && analysisStatus !== 'running' ? "启动中..." : "开始分析" }}</span>
+              </button>
+              <button
+                class="button button--soft"
+                type="button"
+                :disabled="!selectedSource || analysisStatus !== 'running' || busy.analysis"
+                @click="stopAnalysis"
+              >
+                <IconSymbol name="pause" :size="16" />
+                <span>{{ busy.analysis && analysisStatus === 'running' ? "停止中..." : "停止分析" }}</span>
+              </button>
+              <button
+                class="button button--ghost"
+                type="button"
+                :disabled="!selectedSource || selectedSource.source_type !== 'file'"
+                @click="openExportModal('clip')"
+              >
+                <IconSymbol name="film" :size="16" />
+                <span>导出片段</span>
+              </button>
+              <button class="button button--ghost" type="button" @click="openConfigCenter()">
+                <IconSymbol name="sliders" :size="16" />
+                <span>配置</span>
+              </button>
+            </div>
+          </div>
 
+          <div class="monitor-grid">
+            <article class="panel panel--video">
               <div class="video-stage" :class="{ 'is-empty': !frameSrc }" :style="videoStageStyle">
                 <img v-if="frameSrc" :src="frameSrc" alt="实时监控画面" class="video-stage__frame" />
                 <div class="video-stage__grid"></div>
@@ -104,133 +125,59 @@
                     <IconSymbol name="target" :size="14" />
                     <span>{{ densityLabel }}</span>
                   </span>
-                  <span>{{ liveTimestampLabel }}</span>
-                </div>
-              </div>
-
-              <div class="action-bar">
-                <button
-                  class="button button--primary"
-                  type="button"
-                  :disabled="!selectedSource || busy.analysis"
-                  @click="startAnalysis"
-                >
-                  <IconSymbol name="play" :size="16" />
-                  <span>{{ busy.analysis && analysisStatus !== 'running' ? "启动中..." : "开始分析" }}</span>
-                </button>
-                <button
-                  class="button button--soft"
-                  type="button"
-                  :disabled="!selectedSource || analysisStatus !== 'running' || busy.analysis"
-                  @click="stopAnalysis"
-                >
-                  <IconSymbol name="pause" :size="16" />
-                  <span>{{ busy.analysis && analysisStatus === 'running' ? "停止中..." : "停止分析" }}</span>
-                </button>
-                <button
-                  class="button button--ghost"
-                  type="button"
-                  :disabled="!selectedSource || selectedSource.source_type !== 'file'"
-                  @click="openExportModal('clip')"
-                >
-                  <IconSymbol name="film" :size="16" />
-                  <span>导出片段</span>
-                </button>
-                <button
-                  class="button button--ghost button--danger"
-                  type="button"
-                  :disabled="!selectedSource"
-                  @click="requestDeleteSource(selectedSource!)"
-                >
-                  <IconSymbol name="trash" :size="16" />
-                  <span>删除当前源</span>
-                </button>
-              </div>
-            </article>
-
-            <article class="panel panel--insight panel--fill">
-              <div class="panel-head">
-                <div>
-                  <h3>系统</h3>
-                </div>
-              </div>
-
-              <div class="system-grid">
-                <div class="system-card">
-                  <span>在线源</span>
-                  <strong>{{ systemStatus.active_sources }}/{{ sources.length }}</strong>
-                </div>
-                <div class="system-card">
-                  <span>内存占用</span>
-                  <strong>{{ formatPercent(systemStatus.memory_usage) }}</strong>
-                </div>
-                <div class="system-card">
-                  <span>GPU 占用</span>
-                  <strong>{{ formatPercent(systemStatus.gpu_usage) }}</strong>
-                </div>
-                <div class="system-card">
-                  <span>运行时长</span>
-                  <strong>{{ uptimeLabel }}</strong>
-                </div>
-              </div>
-
-              <div class="insight-section">
-                <div class="panel-head panel-head--compact">
-                  <div>
-                    <h3>区域</h3>
-                  </div>
-                  <button class="button button--ghost button--tiny" type="button" @click="openConfigCenter('regions')">
-                    <IconSymbol name="sliders" :size="16" />
-                    <span>配置</span>
-                  </button>
-                </div>
-
-                <div v-if="regionSummaryRows.length" class="region-stack region-stack--hero">
-                  <article
-                    v-for="region in regionSummaryRows"
-                    :key="region.region_id"
-                    class="region-row"
-                    :data-tone="region.tone"
-                  >
-                    <div class="region-row__meta">
-                      <span class="region-swatch" :style="{ backgroundColor: region.color }"></span>
-                      <div>
-                        <strong>{{ region.name }}</strong>
-                      </div>
-                    </div>
-                    <div class="region-row__stats">
-                      <span>人数 {{ formatCount(region.count) }}</span>
-                      <span>密度 {{ formatDecimal(region.density, 2) }} 人/m²</span>
-                    </div>
-                    <button class="icon-button" type="button" @click="openRegionModal(region)">
-                      <IconSymbol name="edit" :size="16" />
-                    </button>
-                  </article>
-                </div>
-                <div v-else class="empty-box empty-box--fill">
-                  <IconSymbol name="target" :size="18" />
-                  <span>暂无区域</span>
+                  <span class="soft-chip" data-tone="neutral">
+                    <IconSymbol name="clock" :size="14" />
+                    <span>{{ liveTimestampLabel }}</span>
+                  </span>
                 </div>
               </div>
             </article>
-          </div>
 
-              <div class="metric-grid">
+            <aside class="live-sidebar">
+              <div class="live-sidebar__metrics">
                 <article
                   v-for="card in summaryCards"
-              :key="card.label"
-              class="metric-card"
-              :data-tone="card.tone"
-            >
-                <div class="metric-card__head">
-                  <span class="metric-card__icon">
-                    <IconSymbol :name="card.icon" :size="16" />
-                  </span>
-                  <span>{{ card.label }}</span>
+                  :key="card.label"
+                  class="live-metric-card"
+                  :data-tone="card.tone"
+                >
+                  <div class="live-metric-card__head">
+                    <IconSymbol :name="card.icon" :size="14" />
+                    <span>{{ card.label }}</span>
+                  </div>
+                  <strong>{{ card.value }}</strong>
+                  <small>{{ card.hint }}</small>
+                </article>
+              </div>
+
+            </aside>
+          </div>
+
+          <div v-if="regionSummaryRows.length" class="region-bar">
+            <div class="region-bar__head">
+              <strong>区域监测</strong>
+              <button class="button button--ghost button--tiny" type="button" @click="openConfigCenter('regions')">
+                <IconSymbol name="sliders" :size="14" />
+              </button>
+            </div>
+            <div class="region-bar__list">
+              <article
+                v-for="region in regionSummaryRows"
+                :key="region.region_id"
+                class="region-bar__card"
+                :data-tone="region.tone"
+              >
+                <span class="region-swatch" :style="{ backgroundColor: region.color }"></span>
+                <div class="region-bar__card-body">
+                  <strong>{{ region.name }}</strong>
+                  <div class="region-bar__card-stats">
+                    <span>{{ formatCount(region.count) }} 人</span>
+                    <span class="region-bar__density">{{ formatDecimal(region.density, 2) }} 人/m²</span>
+                  </div>
                 </div>
-                <strong>{{ card.value }}</strong>
               </article>
             </div>
+          </div>
         </section>
 
         <section ref="historySection" class="section-block">
@@ -342,94 +289,195 @@
           </div>
         </section>
 
+        <section ref="querySection" class="section-block">
+          <div class="section-caption">
+            <div class="section-caption__title">
+              <h2>数据查询</h2>
+              <div class="toggle-group">
+                <button
+                  class="toggle-group__item"
+                  :class="{ 'is-active': queryMode === 'crossline' }"
+                  type="button"
+                  @click="queryMode = 'crossline'"
+                >
+                  计数线
+                </button>
+                <button
+                  class="toggle-group__item"
+                  :class="{ 'is-active': queryMode === 'region' }"
+                  type="button"
+                  @click="queryMode = 'region'"
+                >
+                  区域
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="query-toolbar">
+            <div class="toggle-group">
+              <button
+                v-for="item in queryRangeOptions"
+                :key="item.value"
+                class="toggle-group__item"
+                :class="{ 'is-active': queryRange === item.value }"
+                type="button"
+                @click="queryRange = item.value"
+              >
+                {{ item.label }}
+              </button>
+            </div>
+
+            <select v-if="queryMode === 'crossline'" v-model="queryCrosslineId" class="field field--select">
+              <option value="all">全部计数线</option>
+              <option v-for="line in crosslines" :key="line.line_id" :value="line.line_id">
+                {{ line.name }}
+              </option>
+            </select>
+
+            <select v-else v-model="queryRegionId" class="field field--select">
+              <option value="all">全局汇总</option>
+              <option v-for="region in regions" :key="region.region_id" :value="region.region_id">
+                {{ region.name }}
+              </option>
+            </select>
+
+            <button class="button button--primary" type="button" :disabled="!selectedSourceId || busy.query" @click="runQuery">
+              <IconSymbol name="spark" :size="16" />
+              <span>{{ busy.query ? "查询中..." : "查询" }}</span>
+            </button>
+          </div>
+
+          <div v-if="queryResult" class="query-results">
+            <div class="query-stat-grid">
+              <template v-if="queryMode === 'crossline'">
+                <article class="query-stat-card" data-tone="primary">
+                  <span>独立进入</span>
+                  <strong>{{ queryResult.totalIn }}</strong>
+                  <small>ByteTrack 去重</small>
+                </article>
+                <article class="query-stat-card" data-tone="warning">
+                  <span>独立离开</span>
+                  <strong>{{ queryResult.totalOut }}</strong>
+                </article>
+                <article class="query-stat-card" data-tone="success">
+                  <span>净流量</span>
+                  <strong>{{ queryResult.netFlow }}</strong>
+                </article>
+                <article class="query-stat-card" data-tone="neutral">
+                  <span>峰值人数</span>
+                  <strong>{{ queryResult.maxCount }}</strong>
+                  <small>{{ queryResult.maxTime }}</small>
+                </article>
+              </template>
+              <template v-else>
+                <article class="query-stat-card" data-tone="primary">
+                  <span>平均人数</span>
+                  <strong>{{ queryResult.totalIn }}</strong>
+                  <small>总人流（含重复）</small>
+                </article>
+                <article class="query-stat-card" data-tone="warning">
+                  <span>峰值人数</span>
+                  <strong>{{ queryResult.maxCount }}</strong>
+                  <small>{{ queryResult.maxTime }}</small>
+                </article>
+                <article class="query-stat-card" data-tone="success">
+                  <span>最低人数</span>
+                  <strong>{{ queryResult.totalOut }}</strong>
+                </article>
+                <article class="query-stat-card" data-tone="neutral">
+                  <span>平均密度</span>
+                  <strong>{{ queryResult.netFlow }}</strong>
+                  <small>人/m²</small>
+                </article>
+              </template>
+            </div>
+
+            <article class="panel panel--chart">
+              <div class="panel-head">
+                <div>
+                  <h3>{{ queryRangeLabel }} · {{ queryMode === 'crossline' ? queryCrosslineLabel : queryRegionLabel }}</h3>
+                </div>
+              </div>
+              <div ref="queryChartRef" class="chart-surface"></div>
+            </article>
+          </div>
+          <div v-else class="empty-box">
+            <IconSymbol name="chart" :size="18" />
+            <span>选择时间范围后点击查询</span>
+          </div>
+        </section>
+
         <section ref="alertsSection" class="section-block">
           <div class="section-caption">
             <div class="section-caption__title">
               <h2>风险</h2>
-              <span class="soft-chip" data-tone="danger">
+              <span v-if="recentAlerts.length" class="soft-chip" :data-tone="criticalAlertCount ? 'danger' : 'warning'">
                 <IconSymbol name="warning" :size="14" />
-                <span>最近 {{ recentAlerts.length }} 条</span>
+                <span>{{ recentAlerts.length }} 条告警</span>
               </span>
+              <span v-else class="soft-chip" data-tone="success">
+                <IconSymbol name="check" :size="14" />
+                <span>暂无告警</span>
+              </span>
+            </div>
+            <button class="button button--ghost" type="button" :disabled="!selectedSource" @click="openExportModal('alerts')">
+              <IconSymbol name="export" :size="16" />
+              <span>导出</span>
+            </button>
+          </div>
+
+          <div class="alerts-summary-bar">
+            <div class="alerts-summary-bar__item" data-tone="danger">
+              <IconSymbol name="warning" :size="16" />
+              <strong>{{ criticalAlertCount }}</strong>
+              <span>严重</span>
+            </div>
+            <div class="alerts-summary-bar__item" data-tone="warning">
+              <IconSymbol name="alert" :size="16" />
+              <strong>{{ warningAlertCount }}</strong>
+              <span>警告</span>
+            </div>
+            <div class="alerts-summary-bar__item" data-tone="neutral">
+              <IconSymbol name="clock" :size="16" />
+              <strong>{{ recentAlerts.length ? relativeTime(recentAlerts[0].timestamp) : '--' }}</strong>
+              <span>最近触发</span>
             </div>
           </div>
 
-          <div class="alerts-grid">
-            <article class="panel panel--fill panel--alerts-records">
-              <div class="panel-head">
-                <div>
-                  <h3>记录</h3>
+          <div v-if="recentAlerts.length" class="alert-timeline">
+            <article
+              v-for="alert in recentAlerts"
+              :key="alert.alert_id"
+              class="alert-timeline-card"
+              :data-tone="alertTone(alert.level)"
+            >
+              <div class="alert-timeline-card__indicator">
+                <span class="alert-timeline-card__dot"></span>
+                <span class="alert-timeline-card__line"></span>
+              </div>
+              <div class="alert-timeline-card__body">
+                <div class="alert-timeline-card__header">
+                  <span class="alert-timeline-card__level">
+                    <IconSymbol :name="alert.level === 'critical' ? 'warning' : 'alert'" :size="14" />
+                    <span>{{ alert.level === 'critical' ? '严重' : '警告' }}</span>
+                  </span>
+                  <span class="alert-timeline-card__time">{{ relativeTime(alert.timestamp) }}</span>
                 </div>
-                <button class="button button--ghost" type="button" :disabled="!selectedSource" @click="openExportModal('alerts')">
-                  <IconSymbol name="export" :size="16" />
-                  <span>导出记录</span>
-                </button>
-              </div>
-
-              <div v-if="recentAlerts.length" class="alert-stack alert-stack--full stack-scroll">
-                <article
-                  v-for="alert in recentAlerts"
-                  :key="alert.alert_id"
-                  class="alert-row"
-                  :data-tone="alertTone(alert.level)"
-                >
-                  <div class="alert-row__icon">
-                    <IconSymbol name="warning" :size="16" />
-                  </div>
-                  <div class="alert-row__content">
-                    <strong>{{ alert.region_name || "全局区域" }}</strong>
-                    <p>{{ alert.message || alert.alert_type }}</p>
-                    <small>{{ formatDateTime(alert.timestamp) }}</small>
-                  </div>
-                  <span class="alert-row__value">{{ alert.current_value }}/{{ alert.threshold }}</span>
-                </article>
-              </div>
-              <div v-else class="empty-box">
-                <IconSymbol name="check" :size="18" />
-                <span>暂无告警记录</span>
+                <strong>{{ alert.region_name || "全局" }}</strong>
+                <div class="alert-timeline-card__bar-wrap">
+                  <div
+                    class="alert-timeline-card__bar"
+                    :style="{ width: Math.min(100, (alert.current_value / alert.threshold) * 100) + '%' }"
+                  ></div>
+                </div>
+                <small>当前 {{ Math.round(alert.current_value) }} / 阈值 {{ Math.round(alert.threshold) }}</small>
               </div>
             </article>
-
-            <article class="panel panel--fill panel--alerts-summary">
-              <div class="alerts-summary-stack">
-                <section class="alerts-summary-item" data-tone="danger">
-                  <div class="metric-card__head">
-                    <span class="metric-card__icon">
-                      <IconSymbol name="warning" :size="16" />
-                    </span>
-                    <span>严重告警</span>
-                  </div>
-                  <strong>{{ criticalAlertCount }}</strong>
-                </section>
-                <section class="alerts-summary-item" data-tone="warning">
-                  <div class="metric-card__head">
-                    <span class="metric-card__icon">
-                      <IconSymbol name="alert" :size="16" />
-                    </span>
-                    <span>普通告警</span>
-                  </div>
-                  <strong>{{ warningAlertCount }}</strong>
-                </section>
-                <section class="alerts-summary-item" data-tone="primary">
-                  <div class="metric-card__head">
-                    <span class="metric-card__icon">
-                      <IconSymbol name="target" :size="16" />
-                    </span>
-                    <span>风险焦点</span>
-                  </div>
-                  <small>{{ hottestRegionHint }}</small>
-                  <strong>{{ hottestRegionDisplayName }}</strong>
-                </section>
-                <section class="alerts-summary-item" data-tone="neutral">
-                  <div class="metric-card__head">
-                    <span class="metric-card__icon">
-                      <IconSymbol name="clock" :size="16" />
-                    </span>
-                    <span>冷却时间</span>
-                  </div>
-                  <strong>{{ thresholdForm.cooldown }}s</strong>
-                </section>
-              </div>
-            </article>
+          </div>
+          <div v-else class="empty-box">
+            <IconSymbol name="check" :size="18" />
+            <span>系统运行正常，暂无告警</span>
           </div>
         </section>
       </main>
@@ -528,7 +576,7 @@
           </div>
         </section>
 
-        <section v-else class="drawer-section">
+        <section v-else-if="configSection === 'regions'" class="drawer-section">
           <div class="drawer-section__head">
             <div>
               <h3>区域列表</h3>
@@ -561,6 +609,42 @@
           <div v-else class="empty-box empty-box--drawer">
             <IconSymbol name="target" :size="16" />
             <span>暂无区域</span>
+          </div>
+        </section>
+
+        <section v-else class="drawer-section">
+          <div class="drawer-section__head">
+            <div>
+              <h3>计数线列表</h3>
+            </div>
+            <button class="button button--soft button--tiny" type="button" @click="openCrosslineModal()">
+              <IconSymbol name="plus" :size="14" />
+              <span>新增</span>
+            </button>
+          </div>
+
+          <div v-if="crosslines.length" class="drawer-region-stack">
+            <article v-for="line in crosslines" :key="line.line_id" class="drawer-region-card">
+              <div class="drawer-region-card__main">
+                <span class="region-swatch" :style="{ backgroundColor: line.color }"></span>
+                <div>
+                  <strong>{{ line.name }}</strong>
+                  <small>({{ line.start_x.toFixed(0) }}, {{ line.start_y.toFixed(0) }}) → ({{ line.end_x.toFixed(0) }}, {{ line.end_y.toFixed(0) }})</small>
+                </div>
+              </div>
+              <div class="drawer-region-card__actions">
+                <button class="icon-button" type="button" @click="openCrosslineModal(line)">
+                  <IconSymbol name="edit" :size="16" />
+                </button>
+                <button class="icon-button icon-button--danger" type="button" @click="requestDeleteCrossline(line)">
+                  <IconSymbol name="trash" :size="16" />
+                </button>
+              </div>
+            </article>
+          </div>
+          <div v-else class="empty-box empty-box--drawer">
+            <IconSymbol name="target" :size="16" />
+            <span>暂无计数线</span>
           </div>
         </section>
           </div>
@@ -622,7 +706,40 @@
             <span>暂无数据源</span>
           </div>
 
+          <div v-if="selectedSource" class="picker-area-edit">
+            <label class="field-group field-group--inline">
+              <span>物理面积 (m²)</span>
+              <input
+                v-model.number="pickerSceneArea"
+                class="field field--compact"
+                type="number"
+                min="0"
+                step="0.1"
+                placeholder="未设置"
+              />
+              <button
+                class="button button--soft button--tiny"
+                type="button"
+                :disabled="busy.sourceSubmit"
+                @click="saveSourceSceneArea"
+              >
+                <IconSymbol name="save" :size="14" />
+                <span>保存</span>
+              </button>
+            </label>
+          </div>
+
           <div class="modal-actions">
+            <button
+              class="button button--ghost button--danger"
+              type="button"
+              :disabled="!selectedSource"
+              @click="requestDeleteSource(selectedSource!)"
+            >
+              <IconSymbol name="trash" :size="16" />
+              <span>删除当前源</span>
+            </button>
+            <div style="flex: 1"></div>
             <button class="button button--soft" type="button" @click="closeSourcePicker">关闭</button>
             <button class="button button--primary" type="button" @click="openSourceModal('stream')">
               <IconSymbol name="plus" :size="16" />
@@ -674,6 +791,10 @@
               <span>流地址</span>
               <input v-model.trim="sourceModal.url" class="field" type="text" placeholder="rtsp:// 或 http:// ..." />
             </label>
+            <label class="field-group">
+              <span>画面物理面积 (m²)</span>
+              <input v-model.number="sourceModal.sceneArea" class="field" type="number" min="0" step="0.1" placeholder="如 500 — 用于计算密度(人/m²)" />
+            </label>
           </div>
 
           <div v-else class="form-grid">
@@ -688,6 +809,10 @@
               />
             </label>
             <div v-if="sourceModal.file" class="drawer-note">{{ sourceModal.file.name }}</div>
+            <label class="field-group">
+              <span>画面物理面积 (m²)</span>
+              <input v-model.number="sourceModal.sceneArea" class="field" type="number" min="0" step="0.1" placeholder="如 500 — 用于计算密度(人/m²)" />
+            </label>
           </div>
 
           <div class="modal-actions">
@@ -926,6 +1051,166 @@
     </transition>
 
     <transition name="modal-fade">
+      <div v-if="crosslineModal.open" class="modal-overlay" @click.self="closeCrosslineModal">
+        <div class="modal-card modal-card--crossline">
+          <div class="modal-head">
+            <div>
+              <span class="section-eyebrow">CrossLine</span>
+              <h3>{{ crosslineModal.lineId ? "编辑计数线" : "新增计数线" }}</h3>
+            </div>
+            <button class="icon-button" type="button" @click="closeCrosslineModal">
+              <IconSymbol name="close" :size="16" />
+            </button>
+          </div>
+
+          <div class="crossline-editor">
+            <section class="crossline-editor__stage-panel">
+              <div class="crossline-editor__toolbar">
+                <div class="crossline-editor__hint">
+                  <IconSymbol name="target" :size="14" />
+                  <span>{{ crosslineEditorHint }}</span>
+                </div>
+                <div class="crossline-editor__toolbar-actions">
+                  <button
+                    class="button button--ghost button--tiny"
+                    type="button"
+                    :disabled="!crosslineEditor.startPoint && !crosslineEditor.endPoint"
+                    @click="clearCrosslineEditor"
+                  >
+                    清空
+                  </button>
+                </div>
+              </div>
+
+              <div
+                ref="crosslineStageRef"
+                class="region-editor__stage"
+                :class="{ 'is-empty': !frameSrc }"
+                @click="handleCrosslineStageClick"
+                @pointermove="handleCrosslineStagePointerMove"
+                @pointerleave="crosslineEditor.hoverPoint = null"
+              >
+                <img v-if="frameSrc" :src="frameSrc" alt="计数线编辑预览画面" class="region-editor__frame" />
+                <div class="video-stage__grid region-editor__grid"></div>
+
+                <div v-if="!frameSrc" class="region-editor__fallback">
+                  <span class="video-stage__empty-icon">
+                    <IconSymbol name="camera" :size="28" />
+                  </span>
+                  <div>
+                    <strong>等待画面</strong>
+                    <small>没有实时帧时，仍可按比例预设计数线。</small>
+                  </div>
+                </div>
+
+                <svg class="region-editor__overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                  <g v-for="line in crosslineEditorReferenceLines" :key="line.line_id">
+                    <line
+                      :x1="line.start_x" :y1="line.start_y"
+                      :x2="line.end_x" :y2="line.end_y"
+                      class="crossline-editor__reference"
+                      :style="{ stroke: line.color }"
+                    />
+                  </g>
+
+                  <line
+                    v-if="crosslineEditor.startPoint && crosslineEditor.endPoint"
+                    :x1="crosslineEditor.startPoint[0]" :y1="crosslineEditor.startPoint[1]"
+                    :x2="crosslineEditor.endPoint[0]" :y2="crosslineEditor.endPoint[1]"
+                    class="crossline-editor__draft-line"
+                    :style="{ stroke: crosslineModal.color }"
+                  />
+                  <line
+                    v-else-if="crosslineEditor.startPoint && crosslineEditor.hoverPoint"
+                    :x1="crosslineEditor.startPoint[0]" :y1="crosslineEditor.startPoint[1]"
+                    :x2="crosslineEditor.hoverPoint[0]" :y2="crosslineEditor.hoverPoint[1]"
+                    class="crossline-editor__preview-line"
+                    :style="{ stroke: crosslineModal.color }"
+                  />
+                </svg>
+
+                <button
+                  v-if="crosslineEditor.startPoint"
+                  class="region-editor__handle"
+                  :class="{ 'is-active': crosslineDrag.index === 0 }"
+                  type="button"
+                  :style="crosslineHandleStyle(crosslineEditor.startPoint)"
+                  @pointerdown.stop="startCrosslineHandleDrag(0, $event)"
+                >
+                  <span class="sr-only">起点</span>
+                </button>
+                <button
+                  v-if="crosslineEditor.endPoint"
+                  class="region-editor__handle"
+                  :class="{ 'is-active': crosslineDrag.index === 1 }"
+                  type="button"
+                  :style="crosslineHandleStyle(crosslineEditor.endPoint)"
+                  @pointerdown.stop="startCrosslineHandleDrag(1, $event)"
+                >
+                  <span class="sr-only">终点</span>
+                </button>
+              </div>
+
+              <div class="region-editor__stage-meta">
+                <span>{{ crosslineEditorStatus }}</span>
+              </div>
+            </section>
+
+            <aside class="crossline-editor__sidebar">
+              <div class="form-grid">
+                <label class="field-group">
+                  <span>线段名称</span>
+                  <input v-model.trim="crosslineModal.name" class="field" type="text" placeholder="例如：闸机口A" />
+                </label>
+                <label class="field-group">
+                  <span>颜色</span>
+                  <input v-model="crosslineModal.color" class="field field--color" type="color" />
+                </label>
+              </div>
+
+              <div class="crossline-editor__summary">
+                <span class="soft-chip" :data-tone="crosslineEditor.startPoint ? 'success' : 'warning'">
+                  <IconSymbol :name="crosslineEditor.startPoint ? 'check' : 'warning'" :size="14" />
+                  <span>{{ crosslineEditor.startPoint ? '起点已设' : '待设起点' }}</span>
+                </span>
+                <span class="soft-chip" :data-tone="crosslineEditor.endPoint ? 'success' : 'warning'">
+                  <IconSymbol :name="crosslineEditor.endPoint ? 'check' : 'warning'" :size="14" />
+                  <span>{{ crosslineEditor.endPoint ? '终点已设' : '待设终点' }}</span>
+                </span>
+              </div>
+
+              <div v-if="crosslineEditor.startPoint && crosslineEditor.endPoint" class="crossline-editor__coords">
+                <div class="form-grid form-grid--double">
+                  <div class="field-group">
+                    <span>起点</span>
+                    <span class="crossline-editor__coord-value">({{ crosslineEditor.startPoint[0].toFixed(1) }}, {{ crosslineEditor.startPoint[1].toFixed(1) }})</span>
+                  </div>
+                  <div class="field-group">
+                    <span>终点</span>
+                    <span class="crossline-editor__coord-value">({{ crosslineEditor.endPoint[0].toFixed(1) }}, {{ crosslineEditor.endPoint[1].toFixed(1) }})</span>
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </div>
+
+          <div class="modal-actions">
+            <button class="button button--soft" type="button" @click="closeCrosslineModal">取消</button>
+            <button
+              class="button button--primary"
+              type="button"
+              :disabled="busy.crosslineSubmit || !crosslineEditor.startPoint || !crosslineEditor.endPoint || !crosslineModal.name"
+              @click="submitCrosslineModal"
+            >
+              <IconSymbol name="save" :size="16" />
+              <span>{{ busy.crosslineSubmit ? "保存中..." : "保存计数线" }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+    <transition name="modal-fade">
       <div v-if="exportModal.open" class="modal-overlay" @click.self="closeExportModal">
         <div class="modal-card">
           <div class="modal-head">
@@ -1007,12 +1292,14 @@ import {
   ref,
   watch,
 } from "vue";
-import { apiDelete, apiGet, apiPost, apiPut, apiUpload, buildWsUrl, resolveAssetUrl } from "@/api";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload, buildWsUrl, resolveAssetUrl } from "@/api";
 import type {
   AlertRecentItem,
   AlertRecentResponse,
   AlertThresholdConfig,
   AnalysisStatusValue,
+  CrossLine,
+  CrossLineListResponse,
   HistoryMetricKey,
   HistoryResponse,
   HistorySeriesItem,
@@ -1025,13 +1312,14 @@ import type {
   VideoSource,
 } from "@/types";
 
-type SectionKey = "overview" | "history" | "alerts";
+type SectionKey = "overview" | "history" | "query" | "alerts";
+type QueryRange = "today" | "yesterday" | "7d";
 type ToastTone = "info" | "success" | "warning" | "error";
 type SourceModalMode = "stream" | "upload";
 type ExportKind = "history" | "alerts" | "clip";
 type HistoryWindow = "30m" | "6h" | "24h";
 type HistoryInterval = "1m" | "5m" | "1h";
-type ConfigSection = "thresholds" | "layouts" | "regions";
+type ConfigSection = "thresholds" | "layouts" | "regions" | "crosslines";
 type RegionEditorTool = "polygon" | "rectangle";
 type RegionPoint = [number, number];
 type RegionDragMode = "none" | "vertex" | "shape" | "rectangle";
@@ -1049,6 +1337,7 @@ type RegionDraft = {
 const navigationItems: Array<{ key: SectionKey; label: string; icon: string }> = [
   { key: "overview", label: "总览", icon: "overview" },
   { key: "history", label: "趋势", icon: "history" },
+  { key: "query", label: "查询", icon: "chart" },
   { key: "alerts", label: "风险", icon: "alert" },
 ];
 
@@ -1074,6 +1363,7 @@ const configTabs: Array<{ key: ConfigSection; label: string }> = [
   { key: "thresholds", label: "阈值" },
   { key: "layouts", label: "模板" },
   { key: "regions", label: "区域" },
+  { key: "crosslines", label: "计数线" },
 ];
 
 const defaultRegionThresholds = {
@@ -1248,6 +1538,7 @@ const IconSymbol = defineComponent({
 
 const overviewSection = ref<HTMLElement | null>(null);
 const historySection = ref<HTMLElement | null>(null);
+const querySection = ref<HTMLElement | null>(null);
 const alertsSection = ref<HTMLElement | null>(null);
 const historyChartRef = ref<HTMLDivElement | null>(null);
 const fileInputRef = ref<HTMLInputElement | null>(null);
@@ -1272,6 +1563,219 @@ const analysisStatus = ref<AnalysisStatusValue>("ready");
 const analysisStartedAt = ref<string | null>(null);
 const recentAlerts = ref<AlertRecentItem[]>([]);
 const regions = ref<Region[]>([]);
+const crosslines = ref<CrossLine[]>([]);
+
+const crosslineModal = reactive({
+  open: false,
+  lineId: "",
+  name: "",
+  color: "#00FF00",
+});
+
+const crosslineStageRef = ref<HTMLElement | null>(null);
+
+const crosslineEditor = reactive({
+  startPoint: null as RegionPoint | null,
+  endPoint: null as RegionPoint | null,
+  hoverPoint: null as RegionPoint | null,
+});
+
+const crosslineDrag = reactive({
+  index: -1,
+  active: false,
+});
+const isFullscreen = ref(false);
+
+// --- 数据查询 ---
+type QueryMode = "crossline" | "region";
+const queryMode = ref<QueryMode>("crossline");
+const queryRange = ref<QueryRange>("today");
+const queryCrosslineId = ref("all");
+const queryRegionId = ref("all");
+const queryChartRef = ref<HTMLDivElement | null>(null);
+const queryChart = ref<echarts.ECharts | null>(null);
+const queryResult = ref<{
+  totalIn: string;
+  totalOut: string;
+  netFlow: string;
+  maxCount: string;
+  maxTime: string;
+} | null>(null);
+
+const queryRangeOptions: Array<{ value: QueryRange; label: string }> = [
+  { value: "today", label: "今日" },
+  { value: "yesterday", label: "昨日" },
+  { value: "7d", label: "近 7 天" },
+];
+
+const queryRangeLabel = computed(() =>
+  queryRangeOptions.find((item) => item.value === queryRange.value)?.label || "今日"
+);
+
+const queryCrosslineLabel = computed(() => {
+  if (queryCrosslineId.value === "all") return "全部计数线";
+  return crosslines.value.find((l) => l.line_id === queryCrosslineId.value)?.name || "未知计数线";
+});
+
+const queryRegionLabel = computed(() => {
+  if (queryRegionId.value === "all") return "全局汇总";
+  return regions.value.find((r) => r.region_id === queryRegionId.value)?.name || "未知区域";
+});
+
+function getQueryTimeRange(): { from: string; to: string; interval: string } {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  if (queryRange.value === "today") {
+    return { from: todayStart.toISOString(), to: now.toISOString(), interval: "5m" };
+  }
+  if (queryRange.value === "yesterday") {
+    const yesterdayStart = new Date(todayStart);
+    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+    return { from: yesterdayStart.toISOString(), to: todayStart.toISOString(), interval: "5m" };
+  }
+  // 7d
+  const weekAgo = new Date(todayStart);
+  weekAgo.setDate(weekAgo.getDate() - 7);
+  return { from: weekAgo.toISOString(), to: now.toISOString(), interval: "1h" };
+}
+
+async function runQuery() {
+  if (!selectedSourceId.value) {
+    pushToast("请先选择数据源。", "warning");
+    return;
+  }
+
+  busy.query = true;
+  try {
+    const { from, to, interval } = getQueryTimeRange();
+    const url = `/history?source_id=${encodeURIComponent(selectedSourceId.value)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&interval=${interval}`;
+    const data = await apiGet<HistoryResponse>(url);
+    const series = data.series || [];
+
+    if (!series.length) {
+      queryResult.value = null;
+      pushToast("该时间段内暂无数据。", "info");
+      return;
+    }
+
+    let chartSeries: Array<{ name: string; type: string; data: number[]; smooth: boolean; symbol: string; lineStyle: { width: number; color: string }; areaStyle?: { color: string } }> = [];
+    let legendData: string[] = [];
+
+    if (queryMode.value === "crossline") {
+      // 计数线模式：独立人流（ByteTrack 去重）
+      const lastPoint = series[series.length - 1];
+      const firstPoint = series[0];
+      const selectedLineId = queryCrosslineId.value === "all" ? "all" : queryCrosslineId.value;
+      const lastTotals = getHistoryCrosslineTotals(lastPoint, selectedLineId);
+      const firstTotals = getHistoryCrosslineTotals(firstPoint, selectedLineId);
+      const totalIn = lastTotals.inTotal - firstTotals.inTotal;
+      const totalOut = lastTotals.outTotal - firstTotals.outTotal;
+      const netFlow = totalIn - totalOut;
+      const counts = series.map((item) => item.total_count_avg);
+      const maxIdx = counts.indexOf(Math.max(...counts));
+
+      queryResult.value = {
+        totalIn: String(Math.max(0, totalIn)),
+        totalOut: String(Math.max(0, totalOut)),
+        netFlow: `${netFlow >= 0 ? "+" : ""}${netFlow}`,
+        maxCount: String(Math.round(Math.max(...counts))),
+        maxTime: formatTime(series[maxIdx]?.time || ""),
+      };
+
+      const inData = series.map((item) => getHistoryCrosslineTotals(item, selectedLineId).inTotal);
+      const outData = series.map((item) => getHistoryCrosslineTotals(item, selectedLineId).outTotal);
+      legendData = ["累计进入", "累计离开"];
+      chartSeries = [
+        {
+          name: "累计进入",
+          type: "line",
+          data: inData,
+          smooth: true,
+          symbol: "none",
+          lineStyle: { width: 2, color: "#2563EB" },
+          areaStyle: { color: "rgba(37,99,235,0.08)" },
+        },
+        {
+          name: "累计离开",
+          type: "line",
+          data: outData,
+          smooth: true,
+          symbol: "none",
+          lineStyle: { width: 2, color: "#F97316" },
+          areaStyle: { color: "rgba(249,115,22,0.08)" },
+        },
+      ];
+    } else {
+      // 区域模式：总人流（含重复）
+      const rid = queryRegionId.value;
+      let counts: number[];
+      let densities: number[];
+
+      if (rid === "all") {
+        counts = series.map((item) => item.total_count_avg);
+        densities = series.map((item) => item.total_density_avg);
+      } else {
+        counts = series.map((item) => item.regions?.[rid]?.total_count_avg ?? 0);
+        densities = series.map((item) => item.regions?.[rid]?.total_density_avg ?? 0);
+      }
+
+      const maxIdx = counts.indexOf(Math.max(...counts));
+      const avgCount = counts.reduce((a, b) => a + b, 0) / counts.length;
+      const minCount = Math.min(...counts);
+      const avgDensity = densities.reduce((a, b) => a + b, 0) / densities.length;
+
+      queryResult.value = {
+        totalIn: formatDecimal(avgCount, 1),
+        maxCount: String(Math.round(Math.max(...counts))),
+        maxTime: formatTime(series[maxIdx]?.time || ""),
+        totalOut: String(Math.round(minCount)),
+        netFlow: formatDecimal(avgDensity, 2),
+      };
+
+      legendData = ["人数趋势"];
+      chartSeries = [
+        {
+          name: "人数趋势",
+          type: "line",
+          data: counts.map((v) => Number(v.toFixed(1))),
+          smooth: true,
+          symbol: "none",
+          lineStyle: { width: 2, color: "#2563EB" },
+          areaStyle: { color: "rgba(37,99,235,0.08)" },
+        },
+      ];
+    }
+
+    // 渲染查询图表
+    await nextTick();
+    if (!queryChartRef.value) return;
+    if (!queryChart.value) {
+      queryChart.value = echarts.init(queryChartRef.value);
+    }
+    queryChart.value.setOption({
+      tooltip: { trigger: "axis" },
+      legend: { data: legendData, top: 4, right: 16, textStyle: { fontSize: 11, color: "#94a3b8" } },
+      grid: { left: 48, right: 16, top: 32, bottom: 32 },
+      xAxis: {
+        type: "category",
+        data: series.map((item) => formatTime(item.time)),
+        axisLabel: { fontSize: 11, color: "#94a3b8" },
+      },
+      yAxis: {
+        type: "value",
+        axisLabel: { fontSize: 11, color: "#94a3b8" },
+        splitLine: { lineStyle: { color: "rgba(148,163,184,0.12)" } },
+      },
+      series: chartSeries,
+    }, true);
+  } catch (error) {
+    pushToast(extractErrorMessage(error), "error");
+  } finally {
+    busy.query = false;
+  }
+}
+
 const historyData = ref<HistoryResponse>({ series: [] });
 const historyInterval = ref<HistoryInterval>("1m");
 const historyWindow = ref<HistoryWindow>("6h");
@@ -1291,6 +1795,7 @@ const sourceModal = reactive({
   mode: "stream" as SourceModalMode,
   name: "",
   url: "",
+  sceneArea: null as number | null,
   file: null as File | null,
 });
 
@@ -1332,6 +1837,8 @@ const busy = reactive({
   sourceSubmit: false,
   regionSubmit: false,
   exportSubmit: false,
+  crosslineSubmit: false,
+  query: false,
   analysis: false,
   template: false,
 });
@@ -1386,11 +1893,73 @@ const historyMetricMeta = computed(
 
 const frameSrc = computed(() => (liveFrame.value ? `data:image/jpeg;base64,${liveFrame.value.frame}` : ""));
 
-const displayTotals = computed(() => ({
-  totalCount: liveFrame.value?.total_count ?? lastHistoryPoint.value?.total_count_avg ?? null,
-  totalDensity: liveFrame.value?.total_density ?? lastHistoryPoint.value?.total_density_avg ?? null,
-  entrySpeed: liveFrame.value?.entry_speed ?? null,
-}));
+const displayTotals = computed(() => {
+  return {
+    totalCount: liveFrame.value?.total_count ?? lastHistoryPoint.value?.total_count_avg ?? null,
+    totalDensity: liveFrame.value?.total_density ?? lastHistoryPoint.value?.total_density_avg ?? null,
+    dmCountEstimate: liveFrame.value?.dm_count_estimate ?? null,
+  };
+});
+
+function getHistoryCrosslineTotals(
+  point: HistorySeriesItem | null,
+  lineId: string | "all"
+) {
+  if (!point) {
+    return { inTotal: 0, outTotal: 0, netFlow: 0 };
+  }
+
+  if (lineId === "all") {
+    const stats = Object.values(point.crossline_stats || {});
+    if (!stats.length) {
+      const inTotal = point.crossline_in_total ?? 0;
+      const outTotal = point.crossline_out_total ?? 0;
+      return { inTotal, outTotal, netFlow: inTotal - outTotal };
+    }
+
+    const inTotal = stats.reduce((sum, item) => sum + (item.in_total ?? 0), 0);
+    const outTotal = stats.reduce((sum, item) => sum + (item.out_total ?? 0), 0);
+    return { inTotal, outTotal, netFlow: inTotal - outTotal };
+  }
+
+  const stats = point.crossline_stats?.[lineId];
+  const inTotal = stats?.in_total ?? 0;
+  const outTotal = stats?.out_total ?? 0;
+  return { inTotal, outTotal, netFlow: inTotal - outTotal };
+}
+
+function getLiveCrosslineTotals(lineId: string | "all") {
+  const liveStats = liveFrame.value?.crossline_stats || {};
+
+  if (lineId === "all") {
+    const stats = Object.values(liveStats);
+    if (!stats.length) {
+      const inCount = liveFrame.value?.crossline_in_count
+        ?? getHistoryCrosslineTotals(lastHistoryPoint.value, "all").inTotal;
+      const outCount = liveFrame.value?.crossline_out_count
+        ?? getHistoryCrosslineTotals(lastHistoryPoint.value, "all").outTotal;
+      return { inCount, outCount, netFlow: inCount - outCount };
+    }
+
+    const inCount = stats.reduce((sum, item) => sum + (item.in_count ?? 0), 0);
+    const outCount = stats.reduce((sum, item) => sum + (item.out_count ?? 0), 0);
+    return { inCount, outCount, netFlow: inCount - outCount };
+  }
+
+  const stats = liveStats[lineId];
+  if (stats) {
+    const inCount = stats.in_count ?? 0;
+    const outCount = stats.out_count ?? 0;
+    return { inCount, outCount, netFlow: inCount - outCount };
+  }
+
+  const historyTotals = getHistoryCrosslineTotals(lastHistoryPoint.value, lineId);
+  return {
+    inCount: historyTotals.inTotal,
+    outCount: historyTotals.outTotal,
+    netFlow: historyTotals.netFlow,
+  };
+}
 
 const densityTone = computed(() => getDensityTone(displayTotals.value.totalDensity));
 const densityLabel = computed(() => getDensityLabel(displayTotals.value.totalDensity));
@@ -1400,25 +1969,24 @@ const systemStatusLabel = computed(() =>
   systemStatus.status === "running" ? "系统在线" : "系统未就绪"
 );
 
-const uptimeLabel = computed(() => formatUptime(systemStatus.uptime));
-
 function formatSourceMeta(source: VideoSource) {
   const parts = [
     source.source_type === "stream" ? "摄像头 / 推流" : "本地视频",
     source.video_width && source.video_height ? `${source.video_width}×${source.video_height}` : "",
     source.video_fps ? `${Math.round(source.video_fps)} fps` : "",
+    source.scene_area_m2 ? `${source.scene_area_m2} m²` : "",
   ].filter(Boolean);
   return parts.join(" · ") || "等待读取元信息";
 }
 
 const liveTimestampLabel = computed(() => {
   if (liveFrame.value?.ts) {
-    return `最后更新 ${formatDateTime(liveFrame.value.ts)}`;
+    return `画面帧 ${formatDateTime(liveFrame.value.ts)}`;
   }
   if (analysisStatus.value === "running") {
-    return "已启动分析，等待首帧画面";
+    return "等待首帧...";
   }
-  return "尚未开始分析";
+  return "未分析";
 });
 
 const videoStageStyle = computed(() => {
@@ -1427,29 +1995,52 @@ const videoStageStyle = computed(() => {
   return width && height ? { aspectRatio: `${width} / ${height}` } : { aspectRatio: "16 / 9" };
 });
 
-const summaryCards = computed(() => [
-  {
-    label: "当前人数",
-    value: formatCount(displayTotals.value.totalCount),
-    hint: liveFrame.value ? "来自实时画面" : "使用最近历史值回填",
-    tone: "primary",
-    icon: "spark",
-  },
-  {
-    label: "平均密度",
-    value: formatDecimal(displayTotals.value.totalDensity, 2),
-    hint: densityLabel.value,
-    tone: densityTone.value,
-    icon: "target",
-  },
-  {
-    label: "历史点位",
-    value: String(historyData.value.series.length),
-    hint: `${historyWindowLabel(historyWindow.value)} · ${historyIntervalLabel(historyInterval.value)}`,
-    tone: "neutral",
-    icon: "chart",
-  },
-]);
+const summaryCards = computed(() => {
+  const dmCount = displayTotals.value.dmCountEstimate;
+  const cards: Array<{ label: string; value: string; hint: string; tone: string; icon: string }> = [
+    {
+      label: "画面人数",
+      value: dmCount != null ? Math.round(dmCount) + " 人" : "--",
+      hint: liveFrame.value ? "DM-Count 密度估计" : "等待分析启动",
+      tone: "primary",
+      icon: "spark",
+    },
+    {
+      label: "密度",
+      value: dmCount != null && displayTotals.value.totalDensity != null
+        ? formatDecimal(displayTotals.value.totalDensity, 2) + " 人/m²"
+        : "--",
+      hint: "区域平均密度",
+      tone: densityTone.value,
+      icon: "target",
+    },
+  ];
+
+  // 按计数线显示进出
+  if (crosslines.value.length) {
+    for (const line of crosslines.value) {
+      const lineTotals = getLiveCrosslineTotals(line.line_id);
+      cards.push({
+        label: line.name,
+        value: `A ${lineTotals.inCount} / B ${lineTotals.outCount}`,
+        hint: `净流量: ${lineTotals.netFlow >= 0 ? "+" : ""}${lineTotals.netFlow}`,
+        tone: lineTotals.netFlow > 0 ? "success" : "neutral",
+        icon: "chart",
+      });
+    }
+  } else {
+    const totalCrossline = getLiveCrosslineTotals("all");
+    cards.push({
+      label: "A / B",
+      value: `${totalCrossline.inCount} / ${totalCrossline.outCount}`,
+      hint: "未配置计数线",
+      tone: "neutral",
+      icon: "chart",
+    });
+  }
+
+  return cards;
+});
 
 const regionSummaryRows = computed(() =>
   regions.value.map((region) => {
@@ -1498,10 +2089,6 @@ const regionEditorStatus = computed(() => {
   }
   return "继续加点或点击完成闭合";
 });
-
-const rankedRegionSnapshots = computed(() =>
-  [...regionSummaryRows.value].sort((a, b) => (Number(b.density ?? -1) || -1) - (Number(a.density ?? -1) || -1))
-);
 
 const historySeriesPoints = computed(() =>
   (historyData.value.series || []).map((item) => {
@@ -1554,45 +2141,6 @@ const warningAlertCount = computed(
   () => recentAlerts.value.filter((item) => item.level === "warning").length
 );
 
-function isGlobalRegion(points: number[][]) {
-  if (points.length !== 4) return false;
-  const normalized = points
-    .map(([x, y]) => [Math.round(Number(x)), Math.round(Number(y))] as const)
-    .sort(([ax, ay], [bx, by]) => (ax === bx ? ay - by : ax - bx));
-  const corners = [
-    [0, 0],
-    [0, 100],
-    [100, 0],
-    [100, 100],
-  ] as const;
-  return normalized.every(([x, y], index) => x === corners[index][0] && y === corners[index][1]);
-}
-
-const hottestRegionDisplay = computed(() => {
-  const region = rankedRegionSnapshots.value[0];
-  if (!region) {
-    return {
-      name: "未配置区域",
-      hint: "请先划分监测区域",
-    };
-  }
-
-  if (isGlobalRegion(region.points)) {
-    return {
-      name: "全局区域",
-      hint: "当前按整幅画面统计",
-    };
-  }
-
-  return {
-    name: region.name,
-    hint: "当前密度最高区域",
-  };
-});
-
-const hottestRegionDisplayName = computed(() => hottestRegionDisplay.value.name);
-const hottestRegionHint = computed(() => hottestRegionDisplay.value.hint);
-
 const exportTitle = computed(() => {
   if (exportModal.kind === "history") return "导出历史数据";
   if (exportModal.kind === "alerts") return "导出告警记录";
@@ -1607,11 +2155,6 @@ function formatCount(value: number | null | undefined) {
 function formatDecimal(value: number | null | undefined, digits = 0) {
   if (!Number.isFinite(value)) return "--";
   return (value as number).toFixed(digits);
-}
-
-function formatPercent(value: number | null | undefined) {
-  if (!Number.isFinite(value)) return "未采集";
-  return `${Math.round((value as number) * 100)}%`;
 }
 
 function formatDateTime(value: string | null | undefined) {
@@ -1636,12 +2179,15 @@ function formatTime(value: string | null | undefined) {
   });
 }
 
-function formatUptime(totalSeconds: number) {
-  if (!Number.isFinite(totalSeconds)) return "--";
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  return `${minutes}m`;
+function relativeTime(value: string | null | undefined) {
+  if (!value) return "--";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const diff = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (diff < 60) return "刚刚";
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
+  return `${Math.floor(diff / 86400)} 天前`;
 }
 
 function historyWindowLabel(value: HistoryWindow) {
@@ -1672,13 +2218,14 @@ function getDensityTone(value: number | null | undefined) {
 }
 
 function buildThresholdText(region: Region) {
+  const fmtInt = (v: number | null | undefined) => v != null ? Math.round(v) : "-";
   const countPart =
     region.count_warning != null || region.count_critical != null
-      ? `人数 ${region.count_warning ?? "-"} / ${region.count_critical ?? "-"}`
+      ? `人数 ${fmtInt(region.count_warning)} / ${fmtInt(region.count_critical)}`
       : "人数阈值未设置";
   const densityPart =
     region.density_warning != null || region.density_critical != null
-      ? `密度 ${region.density_warning ?? "-"} / ${region.density_critical ?? "-"}`
+      ? `密度 ${fmtInt(region.density_warning)} / ${fmtInt(region.density_critical)}`
       : "密度阈值未设置";
   return `${countPart} · ${densityPart}`;
 }
@@ -1798,6 +2345,7 @@ async function loadSourceContext(sourceId: string) {
   const tasks = await Promise.allSettled([
     loadAnalysisState(sourceId),
     loadRegions(sourceId),
+    loadCrosslines(sourceId),
     loadThresholds(sourceId),
     loadRecentAlerts(sourceId),
     refreshHistory(sourceId),
@@ -1833,6 +2381,183 @@ async function loadRegions(sourceId: string) {
   const data = await apiGet<RegionListResponse>(`/regions?source_id=${encodeURIComponent(sourceId)}`);
   if (sourceId !== selectedSourceId.value) return;
   regions.value = data.regions || [];
+}
+
+async function loadCrosslines(sourceId: string) {
+  const data = await apiGet<CrossLineListResponse>(`/crosslines?source_id=${encodeURIComponent(sourceId)}`);
+  if (sourceId !== selectedSourceId.value) return;
+  crosslines.value = data.lines || [];
+}
+
+async function deleteCrossline(lineId: string) {
+  await apiDelete(`/crosslines/${lineId}`);
+  if (selectedSourceId.value) {
+    await loadCrosslines(selectedSourceId.value);
+  }
+}
+
+const crosslineEditorReferenceLines = computed(() =>
+  crosslines.value.filter((line) => line.line_id !== crosslineModal.lineId)
+);
+
+const crosslineEditorHint = computed(() => {
+  if (!crosslineEditor.startPoint) return "点击画面设置起点";
+  if (!crosslineEditor.endPoint) return "点击画面设置终点";
+  return "拖拽端点可微调位置";
+});
+
+const crosslineEditorStatus = computed(() => {
+  if (!crosslineEditor.startPoint) return "0/2 端点";
+  if (!crosslineEditor.endPoint) return "1/2 端点";
+  return "已完成 — 可拖拽调整";
+});
+
+function crosslineHandleStyle(point: RegionPoint) {
+  return {
+    left: `${point[0]}%`,
+    top: `${point[1]}%`,
+    backgroundColor: crosslineModal.color,
+  };
+}
+
+function openCrosslineModal(line?: CrossLine) {
+  if (!selectedSourceId.value) {
+    pushToast("请先选择数据源。", "warning");
+    return;
+  }
+  crosslineModal.open = true;
+  crosslineModal.lineId = line?.line_id || "";
+  crosslineModal.name = line?.name || `计数线 ${crosslines.value.length + 1}`;
+  crosslineModal.color = line?.color || "#00FF00";
+  crosslineEditor.startPoint = line ? [clampPercent(line.start_x), clampPercent(line.start_y)] : null;
+  crosslineEditor.endPoint = line ? [clampPercent(line.end_x), clampPercent(line.end_y)] : null;
+  crosslineEditor.hoverPoint = null;
+  crosslineDrag.index = -1;
+  crosslineDrag.active = false;
+}
+
+function closeCrosslineModal() {
+  crosslineModal.open = false;
+  crosslineEditor.hoverPoint = null;
+  crosslineDrag.index = -1;
+  crosslineDrag.active = false;
+}
+
+function clearCrosslineEditor() {
+  crosslineEditor.startPoint = null;
+  crosslineEditor.endPoint = null;
+  crosslineEditor.hoverPoint = null;
+}
+
+function getCrosslineStagePoint(event: PointerEvent | MouseEvent) {
+  if (!crosslineStageRef.value) return null;
+  const rect = crosslineStageRef.value.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  const rawX = ((event.clientX - rect.left) / rect.width) * 100;
+  const rawY = ((event.clientY - rect.top) / rect.height) * 100;
+  if (rawX < 0 || rawX > 100 || rawY < 0 || rawY > 100) return null;
+  return [clampPercent(rawX), clampPercent(rawY)] as RegionPoint;
+}
+
+function handleCrosslineStageClick(event: MouseEvent) {
+  if (crosslineDrag.active) {
+    crosslineDrag.active = false;
+    crosslineDrag.index = -1;
+    return;
+  }
+  const point = getCrosslineStagePoint(event);
+  if (!point) return;
+
+  if (!crosslineEditor.startPoint) {
+    crosslineEditor.startPoint = point;
+  } else if (!crosslineEditor.endPoint) {
+    crosslineEditor.endPoint = point;
+    crosslineEditor.hoverPoint = null;
+  }
+}
+
+function handleCrosslineStagePointerMove(event: PointerEvent) {
+  const point = getCrosslineStagePoint(event);
+  if (!point) return;
+
+  if (crosslineDrag.index >= 0) {
+    crosslineDrag.active = true;
+    if (crosslineDrag.index === 0) {
+      crosslineEditor.startPoint = point;
+    } else {
+      crosslineEditor.endPoint = point;
+    }
+    return;
+  }
+
+  if (crosslineEditor.startPoint && !crosslineEditor.endPoint) {
+    crosslineEditor.hoverPoint = point;
+  }
+}
+
+function startCrosslineHandleDrag(index: number, event: PointerEvent) {
+  event.preventDefault();
+  crosslineDrag.index = index;
+  crosslineDrag.active = false;
+}
+
+function handleCrosslineEditorPointerUp() {
+  if (!crosslineModal.open || crosslineDrag.index < 0) return;
+  crosslineDrag.index = -1;
+}
+
+function requestDeleteCrossline(line: CrossLine) {
+  openConfirmDialog({
+    title: "删除计数线",
+    message: `确定删除计数线「${line.name}」吗？此操作不可撤销。`,
+    actionLabel: "删除",
+    tone: "error",
+    action: async () => {
+      await deleteCrossline(line.line_id);
+      pushToast("计数线已删除。", "success");
+    },
+  });
+}
+
+async function submitCrosslineModal() {
+  if (!selectedSourceId.value) return;
+  if (!crosslineEditor.startPoint || !crosslineEditor.endPoint) return;
+  if (!crosslineModal.name.trim()) {
+    pushToast("请填写线段名称。", "warning");
+    return;
+  }
+
+  busy.crosslineSubmit = true;
+  try {
+    const payload = {
+      name: crosslineModal.name.trim(),
+      color: crosslineModal.color,
+      start_x: crosslineEditor.startPoint[0],
+      start_y: crosslineEditor.startPoint[1],
+      end_x: crosslineEditor.endPoint[0],
+      end_y: crosslineEditor.endPoint[1],
+    };
+
+    if (crosslineModal.lineId) {
+      await apiPut(`/crosslines/${encodeURIComponent(crosslineModal.lineId)}`, payload);
+    } else {
+      await apiPost("/crosslines", {
+        source_id: selectedSourceId.value,
+        ...payload,
+      });
+    }
+
+    closeCrosslineModal();
+    await loadCrosslines(selectedSourceId.value);
+    pushToast("计数线已保存。", "success");
+    if (analysisStatus.value === "running") {
+      pushToast("计数线修改后，建议重新开始分析以应用。", "warning", 4200);
+    }
+  } catch (error) {
+    pushToast(extractErrorMessage(error), "error");
+  } finally {
+    busy.crosslineSubmit = false;
+  }
 }
 
 async function loadThresholds(sourceId: string) {
@@ -2018,6 +2743,12 @@ function renderHistoryChart() {
             { offset: 1, color: `${metric.color}08` },
           ]),
         },
+        markPoint: {
+          data: [
+            { type: "max", name: "峰值", symbol: "pin", symbolSize: 40, label: { fontSize: 10 } },
+            { type: "min", name: "低谷", symbol: "pin", symbolSize: 36, label: { fontSize: 10 } },
+          ],
+        },
       },
     ],
   });
@@ -2148,12 +2879,35 @@ async function activateSource(sourceId: string) {
   await loadSourceContext(sourceId);
 }
 
+const pickerSceneArea = ref<number | null>(null);
+
 function openSourcePicker() {
   sourcePickerOpen.value = true;
+  pickerSceneArea.value = selectedSource.value?.scene_area_m2 ?? null;
 }
 
 function closeSourcePicker() {
   sourcePickerOpen.value = false;
+}
+
+async function saveSourceSceneArea() {
+  if (!selectedSource.value) return;
+  busy.sourceSubmit = true;
+  try {
+    const updated = await apiPatch<VideoSource>(`/sources/${encodeURIComponent(selectedSource.value.source_id)}`, {
+      scene_area_m2: pickerSceneArea.value && pickerSceneArea.value > 0 ? pickerSceneArea.value : null,
+    });
+    // 就地更新本地数据，不触发完整刷新
+    const idx = sources.value.findIndex((s) => s.source_id === updated.source_id);
+    if (idx >= 0) {
+      sources.value[idx] = updated;
+    }
+    pushToast("物理面积已更新。", "success");
+  } catch (error) {
+    pushToast(extractErrorMessage(error), "error");
+  } finally {
+    busy.sourceSubmit = false;
+  }
 }
 
 function selectSourceFromPicker(sourceId: string) {
@@ -2256,6 +3010,7 @@ async function submitSourceModal() {
       const data = await apiPost<VideoSource>("/sources/stream", {
         name: sourceModal.name.trim(),
         url: sourceModal.url.trim(),
+        scene_area_m2: sourceModal.sceneArea || null,
       });
       sourceId = data.source_id;
     } else {
@@ -2264,6 +3019,11 @@ async function submitSourceModal() {
       }
       const data = await apiUpload<VideoSource>("/sources/upload", sourceModal.file);
       sourceId = data.source_id;
+      if (sourceModal.sceneArea && sourceModal.sceneArea > 0) {
+        await apiPatch<VideoSource>(`/sources/${encodeURIComponent(sourceId)}`, {
+          scene_area_m2: sourceModal.sceneArea,
+        });
+      }
     }
 
     closeSourceModal();
@@ -2606,9 +3366,10 @@ function handleRegionEditorPointerUp() {
   resetRegionDrag();
 }
 
-function parseNullableNumber(raw: string, digits = 0) {
-  if (!raw.trim()) return null;
-  const value = digits === 0 ? parseInt(raw, 10) : parseFloat(raw);
+function parseNullableNumber(raw: string | number, digits = 0) {
+  const str = String(raw ?? "").trim();
+  if (!str) return null;
+  const value = digits === 0 ? parseInt(str, 10) : parseFloat(str);
   if (!Number.isFinite(value)) {
     throw new Error("请输入有效数字。");
   }
@@ -2804,6 +3565,23 @@ function closeExportModal() {
   exportModal.open = false;
 }
 
+function triggerDownload(url: string) {
+  const link = document.createElement("a");
+  const resolvedUrl = resolveAssetUrl(url);
+  const parts = url.split("/").filter(Boolean);
+  const filename = parts.length > 0 ? parts[parts.length - 1] : "";
+
+  link.href = resolvedUrl;
+  link.rel = "noopener";
+  if (filename) {
+    link.download = filename;
+  }
+
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
 async function submitExportModal() {
   if (!selectedSourceId.value) return;
 
@@ -2832,7 +3610,7 @@ async function submitExportModal() {
       }
     }
 
-    window.open(resolveAssetUrl(url), "_blank", "noopener,noreferrer");
+    triggerDownload(url);
     closeExportModal();
     pushToast("导出任务已生成。", "success");
   } catch (error) {
@@ -2847,6 +3625,7 @@ function scrollToSection(section: SectionKey) {
   const targetMap: Record<SectionKey, HTMLElement | null> = {
     overview: overviewSection.value,
     history: historySection.value,
+    query: querySection.value,
     alerts: alertsSection.value,
   };
   targetMap[section]?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -2856,6 +3635,7 @@ function syncActiveSection() {
   const sections: Array<{ key: SectionKey; el: HTMLElement | null }> = [
     { key: "overview", el: overviewSection.value },
     { key: "history", el: historySection.value },
+    { key: "query", el: querySection.value },
     { key: "alerts", el: alertsSection.value },
   ];
 
@@ -2904,6 +3684,7 @@ onMounted(async () => {
   window.addEventListener("resize", resizeHistoryChart);
   window.addEventListener("pointermove", handleRegionEditorPointerMove);
   window.addEventListener("pointerup", handleRegionEditorPointerUp);
+  window.addEventListener("pointerup", handleCrosslineEditorPointerUp);
 
   await Promise.all([loadSystemStatus(), loadSources()]);
   await nextTick();
@@ -2934,6 +3715,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("resize", resizeHistoryChart);
   window.removeEventListener("pointermove", handleRegionEditorPointerMove);
   window.removeEventListener("pointerup", handleRegionEditorPointerUp);
+  window.removeEventListener("pointerup", handleCrosslineEditorPointerUp);
 });
 </script>
 
@@ -2944,6 +3726,29 @@ onBeforeUnmount(() => {
   grid-template-columns: 84px minmax(0, 1fr);
   gap: 18px;
   padding: 18px;
+}
+
+.console-shell.is-fullscreen {
+  grid-template-columns: 1fr;
+  padding: 8px;
+  gap: 0;
+}
+
+.console-shell.is-fullscreen .nav-rail,
+.console-shell.is-fullscreen .workspace-content > :not(:first-child) {
+  display: none;
+}
+
+.console-shell.is-fullscreen .workspace-header__actions > .button--primary {
+  display: none;
+}
+
+.console-shell.is-fullscreen .video-stage {
+  min-height: 70vh;
+}
+
+.console-shell.is-fullscreen .hero-grid {
+  grid-template-columns: 1fr;
   position: relative;
   max-width: 1560px;
   margin: 0 auto;
@@ -3139,6 +3944,239 @@ onBeforeUnmount(() => {
 
 .hero-grid {
   align-items: stretch;
+}
+
+/* --- Refactored Overview Layout --- */
+
+.overview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.overview-header__source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.overview-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.monitor-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 14px;
+  align-items: start;
+}
+
+.panel--video {
+  min-height: 0;
+}
+
+.live-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* --- 区域监测横条 --- */
+.region-bar {
+  margin-top: 14px;
+}
+.region-bar__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: var(--fg);
+}
+.region-bar__list {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.region-bar__card {
+  flex: 1;
+  min-width: 140px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  transition: border-color 0.2s;
+}
+.region-bar__card[data-tone="danger"] {
+  border-left: 3px solid var(--danger);
+}
+.region-bar__card[data-tone="warning"] {
+  border-left: 3px solid var(--accent);
+}
+.region-bar__card[data-tone="success"] {
+  border-left: 3px solid var(--success, #22c55e);
+}
+.region-bar__card .region-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.region-bar__card-body {
+  flex: 1;
+  min-width: 0;
+}
+.region-bar__card-body strong {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+.region-bar__card-stats {
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
+.region-bar__card-stats span:first-child {
+  font-weight: 600;
+}
+.region-bar__density {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.live-sidebar__metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.live-metric-card {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.live-metric-card__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.live-metric-card strong {
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.live-metric-card small {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.live-metric-card[data-tone="primary"] {
+  border-color: rgba(37, 99, 235, 0.22);
+}
+
+.live-metric-card[data-tone="warning"] {
+  border-color: rgba(249, 115, 22, 0.22);
+}
+
+.live-metric-card[data-tone="success"] {
+  border-color: rgba(22, 163, 74, 0.22);
+}
+
+.live-sidebar__regions {
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  padding: 12px;
+}
+
+.live-sidebar__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.empty-box--compact {
+  padding: 10px;
+  font-size: 12px;
+}
+
+/* --- Data Query Section --- */
+
+.query-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.query-results {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.query-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.query-stat-card {
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.query-stat-card span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.query-stat-card strong {
+  font-size: 20px;
+}
+
+.query-stat-card small {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.query-stat-card[data-tone="primary"] {
+  border-color: rgba(37, 99, 235, 0.22);
+}
+
+.query-stat-card[data-tone="warning"] {
+  border-color: rgba(249, 115, 22, 0.22);
+}
+
+.query-stat-card[data-tone="success"] {
+  border-color: rgba(22, 163, 74, 0.22);
 }
 
 .history-grid {
@@ -3444,10 +4482,10 @@ onBeforeUnmount(() => {
 
 .alerts-summary-item {
   min-height: 0;
-  padding: 16px;
+  padding: 12px 16px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  gap: 2px;
 }
 
 .alerts-summary-item + .alerts-summary-item {
@@ -3456,7 +4494,7 @@ onBeforeUnmount(() => {
 
 .alerts-summary-item strong {
   display: block;
-  margin: 10px 0 0;
+  margin: 4px 0 0;
   font-size: 24px;
   line-height: 1;
   font-family: var(--font-mono);
@@ -3479,6 +4517,147 @@ onBeforeUnmount(() => {
 
 .alerts-summary-item[data-tone="primary"] strong {
   color: var(--primary);
+}
+
+/* --- 告警摘要条 --- */
+.alerts-summary-bar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.alerts-summary-bar__item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.alerts-summary-bar__item strong {
+  font-size: 18px;
+  font-family: var(--font-mono);
+  line-height: 1;
+}
+.alerts-summary-bar__item span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.alerts-summary-bar__item[data-tone="danger"] {
+  border-left: 3px solid var(--danger);
+}
+.alerts-summary-bar__item[data-tone="danger"] strong {
+  color: var(--danger);
+}
+.alerts-summary-bar__item[data-tone="warning"] {
+  border-left: 3px solid var(--accent);
+}
+.alerts-summary-bar__item[data-tone="warning"] strong {
+  color: var(--accent);
+}
+.alerts-summary-bar__item[data-tone="neutral"] {
+  border-left: 3px solid var(--muted);
+}
+
+/* --- 告警时间线 --- */
+.alert-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.alert-timeline-card {
+  display: flex;
+  gap: 14px;
+  padding: 0 0 0 4px;
+}
+.alert-timeline-card__indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 6px;
+}
+.alert-timeline-card__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex-shrink: 0;
+}
+.alert-timeline-card__line {
+  width: 2px;
+  flex: 1;
+  background: var(--border);
+}
+.alert-timeline-card:last-child .alert-timeline-card__line {
+  display: none;
+}
+.alert-timeline-card[data-tone="danger"] .alert-timeline-card__dot {
+  background: var(--danger);
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.4);
+}
+.alert-timeline-card[data-tone="warning"] .alert-timeline-card__dot {
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.4);
+}
+.alert-timeline-card__body {
+  flex: 1;
+  padding: 4px 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.alert-timeline-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.alert-timeline-card__level {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.alert-timeline-card[data-tone="danger"] .alert-timeline-card__level {
+  color: var(--danger);
+}
+.alert-timeline-card[data-tone="warning"] .alert-timeline-card__level {
+  color: var(--accent);
+}
+.alert-timeline-card__time {
+  font-size: 11px;
+  color: var(--muted);
+}
+.alert-timeline-card__body > strong {
+  font-size: 14px;
+}
+.alert-timeline-card__bar-wrap {
+  height: 4px;
+  background: rgba(148, 163, 184, 0.12);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.alert-timeline-card__bar {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+.alert-timeline-card[data-tone="danger"] .alert-timeline-card__bar {
+  background: var(--danger);
+}
+.alert-timeline-card[data-tone="warning"] .alert-timeline-card__bar {
+  background: var(--accent);
+}
+.alert-timeline-card__body > small {
+  font-size: 11px;
+  color: var(--muted);
 }
 
 .metric-card__icon,
@@ -3518,6 +4697,8 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   padding-right: 4px;
 }
+
+/* form-grid--double used by crossline and region editor forms */
 
 .stack-scroll {
   max-height: 440px;
@@ -3821,6 +5002,24 @@ onBeforeUnmount(() => {
   color: var(--muted);
 }
 
+.field-group--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+.field-group--inline .field {
+  flex: 1;
+  min-width: 0;
+}
+.field--compact {
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.picker-area-edit {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
 .field--textarea {
   min-height: 140px;
   padding: 12px 14px;
@@ -4052,9 +5251,14 @@ onBeforeUnmount(() => {
 .toast-card__icon {
   width: 28px;
   height: 28px;
+  min-width: 28px;
   border-radius: 10px;
   background: rgba(37, 99, 235, 0.08);
   color: var(--primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .empty-box {
@@ -4325,6 +5529,96 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
+/* --- Crossline Editor --- */
+
+.modal-card--crossline {
+  width: min(960px, 100%);
+  height: min(72vh, 700px);
+  min-height: 0;
+}
+
+.crossline-editor {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(240px, 0.7fr);
+  gap: 18px;
+}
+
+.crossline-editor__stage-panel {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.crossline-editor__sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.crossline-editor__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.crossline-editor__toolbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.crossline-editor__hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.crossline-editor__summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.crossline-editor__reference {
+  stroke-opacity: 0.34;
+  stroke-width: 0.5;
+  stroke-dasharray: 1.4 1.2;
+  vector-effect: non-scaling-stroke;
+}
+
+.crossline-editor__draft-line {
+  stroke-width: 0.6;
+  stroke-opacity: 0.9;
+  vector-effect: non-scaling-stroke;
+}
+
+.crossline-editor__preview-line {
+  stroke-width: 0.4;
+  stroke-opacity: 0.5;
+  stroke-dasharray: 1.2 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.crossline-editor__coords {
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(37, 99, 235, 0.04);
+  border: 1px solid rgba(37, 99, 235, 0.1);
+}
+
+.crossline-editor__coord-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .toggle-group--modal {
   width: fit-content;
 }
@@ -4364,8 +5658,13 @@ onBeforeUnmount(() => {
   .hero-grid,
   .overview-grid,
   .history-grid,
-  .alerts-grid {
+  .alerts-grid,
+  .monitor-grid {
     grid-template-columns: 1fr;
+  }
+
+  .query-stat-grid {
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .history-toolbar {
@@ -4446,6 +5745,15 @@ onBeforeUnmount(() => {
 
   .region-editor__stage {
     min-height: 320px;
+  }
+
+  .crossline-editor {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-card--crossline {
+    width: min(960px, 100%);
+    height: min(88vh, 860px);
   }
 }
 

@@ -29,6 +29,14 @@ class RegionHistoryStats(BaseModel):
     total_density_avg: float = Field(..., description="平均密度")
 
 
+class CrossLineHistoryStats(BaseModel):
+    """计数线历史统计"""
+
+    name: str = Field(..., description="计数线名称")
+    in_total: int = Field(default=0, description="累计进入")
+    out_total: int = Field(default=0, description="累计离开")
+
+
 class HistorySeriesItem(BaseModel):
     """历史趋势数据点"""
 
@@ -37,6 +45,9 @@ class HistorySeriesItem(BaseModel):
     total_count_max: int = Field(..., description="最大人数")
     total_count_min: int = Field(..., description="最小人数")
     total_density_avg: float = Field(..., description="平均密度")
+    crossline_in_total: int = Field(default=0, description="计数线累计进入")
+    crossline_out_total: int = Field(default=0, description="计数线累计离开")
+    crossline_stats: dict[str, CrossLineHistoryStats] = Field(default_factory=dict, description="各计数线统计")
     regions: dict[str, RegionHistoryStats] = Field(default_factory=dict, description="各区域统计")
 
 

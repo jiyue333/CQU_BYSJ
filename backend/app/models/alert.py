@@ -31,7 +31,7 @@ class Alert(Base):
 
     # 告警信息
     alert_type: Mapped[str] = mapped_column(
-        String(30), nullable=False, comment="类型: total_count / region_count"
+        String(30), nullable=False, comment="类型: total_count / region_count / region_density"
     )
     level: Mapped[str] = mapped_column(
         String(20), nullable=False, comment="级别: warning / critical"
@@ -65,7 +65,7 @@ class Alert(Base):
 
     # 表约束和索引
     __table_args__ = (
-        CheckConstraint("alert_type IN ('total_count', 'region_count')", name="ck_alert_type"),
+        CheckConstraint("alert_type IN ('total_count', 'region_count', 'region_density')", name="ck_alert_type"),
         CheckConstraint("level IN ('warning', 'critical')", name="ck_alert_level"),
         Index("idx_alerts_source_id", "source_id"),
         Index("idx_alerts_timestamp", "timestamp"),

@@ -46,6 +46,7 @@ class VideoSource(Base):
     video_height: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, comment="视频高度")
     video_fps: Mapped[Optional[float]] = mapped_column(Float, nullable=True, comment="帧率")
     total_frames: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, comment="总帧数")
+    scene_area_m2: Mapped[Optional[float]] = mapped_column(Float, nullable=True, comment="画面对应物理面积（m²）")
 
     # 时间戳（SQLite 用 TEXT 存储 ISO8601）
     created_at: Mapped[str] = mapped_column(

@@ -69,6 +69,13 @@ export const apiPut = <T>(path: string, body?: unknown) =>
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 
+export const apiPatch = <T>(path: string, body?: unknown) =>
+  apiRequest<T>(path, {
+    method: "PATCH",
+    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
 export const apiDelete = <T>(path: string) =>
   apiRequest<T>(path, {
     method: "DELETE",

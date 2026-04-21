@@ -74,3 +74,66 @@ def init_db() -> None:
 
     # 创建所有表
     Base.metadata.create_all(bind=engine)
+
+    # 轻量级迁移：为已有表添加新列（SQLite 不支持 ALTER COLUMN，但支持 ADD COLUMN）
+    with engine.connect() as conn:
+        from sqlalchemy import inspect as sa_inspect, text
+        inspector = sa_inspect(engine)
+        if "stats_aggregated" in inspector.get_table_names():
+            existing = {col["name"] for col in inspector.get_columns("stats_aggregated")}
+            if "crossline_in_total" not in existing:
+                conn.execute(text("ALTER TABLE stats_aggregated ADD COLUMN crossline_in_total INTEGER DEFAULT 0"))
+            if "crossline_out_total" not in existing:
+                conn.execute(text("ALTER TABLE stats_aggregated ADD COLUMN crossline_out_total INTEGER DEFAULT 0"))
+            if "crossline_stats" not in existing:
+                conn.execute(text("ALTER TABLE stats_aggregated ADD COLUMN crossline_stats TEXT"))
+            conn.commit()
+
+        if "alerts" in inspector.get_table_names():
+            create_sql = conn.execute(
+                text("SELECT sql FROM sqlite_master WHERE type='table' AND name='alerts'")
+            ).scalar() or ""
+            if "region_density" not in create_sql:
+                conn.execute(text("PRAGMA foreign_keys=OFF"))
+                conn.execute(text("""
+                    CREATE TABLE alerts_new (
+                        alert_id VARCHAR(36) NOT NULL,
+                        source_id VARCHAR(36) NOT NULL,
+                        alert_type VARCHAR(30) NOT NULL,
+                        level VARCHAR(20) NOT NULL,
+                        region_id VARCHAR(36),
+                        region_name VARCHAR(100),
+                        current_value INTEGER NOT NULL,
+                        threshold INTEGER NOT NULL,
+                        message TEXT,
+                        is_acknowledged INTEGER NOT NULL,
+                        acknowledged_at VARCHAR(30),
+                        timestamp VARCHAR(30) NOT NULL,
+                        created_at VARCHAR(30) NOT NULL,
+                        PRIMARY KEY (alert_id),
+                        CONSTRAINT ck_alert_type CHECK (alert_type IN ('total_count', 'region_count', 'region_density')),
+                        CONSTRAINT ck_alert_level CHECK (level IN ('warning', 'critical')),
+                        FOREIGN KEY(source_id) REFERENCES video_sources (source_id) ON DELETE CASCADE
+                    )
+                """))
+                conn.execute(text("""
+                    INSERT INTO alerts_new (
+                        alert_id, source_id, alert_type, level, region_id, region_name,
+                        current_value, threshold, message, is_acknowledged, acknowledged_at,
+                        timestamp, created_at
+                    )
+                    SELECT
+                        alert_id, source_id, alert_type, level, region_id, region_name,
+                        current_value, threshold, message, is_acknowledged, acknowledged_at,
+                        timestamp, created_at
+                    FROM alerts
+                """))
+                conn.execute(text("DROP TABLE alerts"))
+                conn.execute(text("ALTER TABLE alerts_new RENAME TO alerts"))
+                conn.execute(text("CREATE INDEX idx_alerts_level ON alerts (level)"))
+                conn.execute(text("CREATE INDEX idx_alerts_unacknowledged ON alerts (source_id, is_acknowledged)"))
+                conn.execute(text("CREATE INDEX idx_alerts_source_time ON alerts (source_id, timestamp)"))
+                conn.execute(text("CREATE INDEX idx_alerts_source_id ON alerts (source_id)"))
+                conn.execute(text("CREATE INDEX idx_alerts_timestamp ON alerts (timestamp)"))
+                conn.execute(text("PRAGMA foreign_keys=ON"))
+                conn.commit()

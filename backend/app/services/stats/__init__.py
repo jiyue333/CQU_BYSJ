@@ -5,6 +5,7 @@
 """
 
 from app.services.stats.aggregator import (
+    CrossLineFrameStats,
     StatsAggregator,
     FrameStats,
     RegionFrameStats,
@@ -15,6 +16,7 @@ from app.services.stats.exporter import StatsExporter
 __all__ = [
     "StatsAggregator",
     "FrameStats",
+    "CrossLineFrameStats",
     "RegionFrameStats",
     "StatsExporter",
     "stats_aggregator",

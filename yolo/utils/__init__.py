@@ -473,7 +473,9 @@ def set_logging(name="LOGGING_NAME", verbose=True):
     # Set up the logger
     logger = logging.getLogger(name)
     logger.setLevel(level)
-    logger.addHandler(stream_handler)
+    # 防止重复 handler（本地 yolo 包和 pip ultralytics 共用 logger 名）
+    if not any(isinstance(h, logging.StreamHandler) and h.stream is sys.stdout for h in logger.handlers):
+        logger.addHandler(stream_handler)
     logger.propagate = False
     return logger
 

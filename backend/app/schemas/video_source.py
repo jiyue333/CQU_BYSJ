@@ -20,6 +20,7 @@ class StreamCreate(BaseModel):
 
     url: str = Field(..., description="流地址 (rtsp/rtmp/http)")
     name: str = Field(..., description="数据源名称")
+    scene_area_m2: Optional[float] = Field(default=None, description="画面对应物理面积（m²）")
 
 
 class VideoSourceResponse(BaseModel):
@@ -35,6 +36,7 @@ class VideoSourceResponse(BaseModel):
     video_height: Optional[int] = Field(default=None, description="视频高度")
     video_fps: Optional[float] = Field(default=None, description="帧率")
     total_frames: Optional[int] = Field(default=None, description="总帧数")
+    scene_area_m2: Optional[float] = Field(default=None, description="画面对应物理面积（m²）")
     created_at: str = Field(..., description="创建时间")
 
     model_config = {"from_attributes": True}

@@ -30,6 +30,16 @@ class RegionFrameStats:
 
 
 @dataclass
+class CrossLineFrameStats:
+    """单帧计数线统计"""
+
+    line_id: str
+    name: str
+    in_count: int
+    out_count: int
+
+
+@dataclass
 class FrameStats:
     """单帧统计数据（来自推理服务）"""
     source_id: str
@@ -37,6 +47,10 @@ class FrameStats:
     total_count: int
     total_density: float
     regions: list[RegionFrameStats] = field(default_factory=list)
+    crosslines: list[CrossLineFrameStats] = field(default_factory=list)
+    crossline_in_count: int = 0
+    crossline_out_count: int = 0
+    dm_count_estimate: float = 0.0
 
 
 @dataclass
@@ -85,11 +99,40 @@ class AggregatedBucket:
                 "density_avg": sum(densities) / len(densities) if densities else 0,
             }
 
+        crossline_data: dict[str, dict] = defaultdict(lambda: {
+            "name": "",
+            "in_counts": [],
+            "out_counts": [],
+        })
+        for sample in self.samples:
+            for c in sample.crosslines:
+                crossline_data[c.line_id]["name"] = c.name
+                crossline_data[c.line_id]["in_counts"].append(c.in_count)
+                crossline_data[c.line_id]["out_counts"].append(c.out_count)
+
+        crossline_stats = {}
+        for line_id, data in crossline_data.items():
+            in_counts = data["in_counts"]
+            out_counts = data["out_counts"]
+            crossline_stats[line_id] = {
+                "name": data["name"],
+                "in_total": max(in_counts) if in_counts else 0,
+                "out_total": max(out_counts) if out_counts else 0,
+            }
+
+        crossline_in_total = sum(item["in_total"] for item in crossline_stats.values())
+        crossline_out_total = sum(item["out_total"] for item in crossline_stats.values())
+        dm_counts = [s.dm_count_estimate for s in self.samples]
+
         return {
             "total_count_avg": sum(total_counts) / len(total_counts),
             "total_count_max": max(total_counts),
             "total_count_min": min(total_counts),
             "total_density_avg": sum(total_densities) / len(total_densities),
+            "crossline_in_total": crossline_in_total,
+            "crossline_out_total": crossline_out_total,
+            "crossline_stats": crossline_stats,
+            "dm_count_avg": sum(dm_counts) / len(dm_counts) if dm_counts else 0,
             "region_stats": region_stats,
             "sample_count": self.sample_count,
         }
@@ -189,6 +232,9 @@ class StatsAggregator:
                     total_count_max=aggregated["total_count_max"],
                     total_count_min=aggregated["total_count_min"],
                     total_density_avg=aggregated["total_density_avg"],
+                    crossline_in_total=aggregated.get("crossline_in_total", 0),
+                    crossline_out_total=aggregated.get("crossline_out_total", 0),
+                    crossline_stats=json.dumps(aggregated.get("crossline_stats", {}), ensure_ascii=False),
                     region_stats=json.dumps(aggregated["region_stats"], ensure_ascii=False),
                     sample_count=aggregated["sample_count"],
                 )
@@ -346,6 +392,29 @@ def rollup_stats(db: Session, source_id: Optional[str] = None) -> int:
                         "density_avg": sum(data["densities"]) / len(data["densities"]) if data["densities"] else 0,
                     }
 
+                merged_crosslines: dict[str, dict] = defaultdict(lambda: {
+                    "name": "",
+                    "in_totals": [],
+                    "out_totals": [],
+                })
+                for s in bucket_stats:
+                    crossline_dict = s.get_crossline_stats_dict()
+                    for line_id, c in crossline_dict.items():
+                        merged_crosslines[line_id]["name"] = c.name
+                        merged_crosslines[line_id]["in_totals"].append(c.in_total)
+                        merged_crosslines[line_id]["out_totals"].append(c.out_total)
+
+                crossline_stats = {}
+                for line_id, data in merged_crosslines.items():
+                    crossline_stats[line_id] = {
+                        "name": data["name"],
+                        "in_total": max(data["in_totals"]) if data["in_totals"] else 0,
+                        "out_total": max(data["out_totals"]) if data["out_totals"] else 0,
+                    }
+
+                crossline_in_total = sum(item["in_total"] for item in crossline_stats.values())
+                crossline_out_total = sum(item["out_total"] for item in crossline_stats.values())
+
                 stat = StatsAggregated(
                     source_id=sid,
                     time_bucket=bucket_key,
@@ -354,6 +423,9 @@ def rollup_stats(db: Session, source_id: Optional[str] = None) -> int:
                     total_count_max=max(total_maxes),
                     total_count_min=min(total_mins),
                     total_density_avg=sum(total_densities) / len(total_densities),
+                    crossline_in_total=crossline_in_total,
+                    crossline_out_total=crossline_out_total,
+                    crossline_stats=json.dumps(crossline_stats, ensure_ascii=False),
                     region_stats=json.dumps(region_stats, ensure_ascii=False),
                     sample_count=sum(sample_counts),
                 )

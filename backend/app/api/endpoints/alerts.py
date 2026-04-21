@@ -141,8 +141,8 @@ async def get_recent_alerts(
             level=a.level,
             region_id=a.region_id,
             region_name=a.region_name,
-            current_value=a.current_value,
-            threshold=a.threshold,
+            current_value=int(round(a.current_value)),
+            threshold=int(round(a.threshold)),
             timestamp=a.timestamp,
             message=a.message,
         )

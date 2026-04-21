@@ -1,114 +1,209 @@
 """
 YOLO 检测服务
 
-同时提供：
-- 实时热力图可视化（自定义 RealtimeHeatmapRenderer）
+职责：
+- 人物检测与追踪（model.track）
 - 多区域实时人数统计（solutions.RegionCounter）
-- 区域物理密度计算（人/m²）
+- Cross-line 单向计数（solutions.ObjectCounter）
 - 区域边框和人数叠加显示
+
+注意：密度图/热力图由 DMCountService 负责，本服务不再处理。
 """
 
 import warnings
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import cv2
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
-# 过滤 Ultralytics "No tracks found" 警告
 warnings.filterwarnings("ignore", message=".*No tracks found.*")
 
 from ultralytics import YOLO, solutions
 
-from app.utils import calculate_density, calculate_polygon_area
-from app.services.detection.realtime_heatmap import RealtimeHeatmapRenderer
 from app.core.config import settings
 from app.core.logger import logger
+
+# 中文字体（懒加载）
+_font_cache: dict[int, ImageFont.FreeTypeFont] = {}
+
+_FONT_CANDIDATES = [
+    "/System/Library/Fonts/STHeiti Light.ttc",           # macOS
+    "/System/Library/Fonts/PingFang.ttc",                # macOS
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",  # Linux
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # Linux
+    "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc",         # Linux
+    "C:/Windows/Fonts/msyh.ttc",                               # Windows
+]
+
+
+def _get_font(size: int = 16) -> ImageFont.FreeTypeFont:
+    if size in _font_cache:
+        return _font_cache[size]
+    for path in _FONT_CANDIDATES:
+        if Path(path).exists():
+            font = ImageFont.truetype(path, size)
+            _font_cache[size] = font
+            return font
+    font = ImageFont.load_default()
+    _font_cache[size] = font
+    return font
+
+
+def _put_chinese_text(
+    img: np.ndarray,
+    text: str,
+    position: tuple[int, int],
+    font_size: int = 16,
+    color: tuple[int, int, int] = (255, 255, 255),
+    bg_color: tuple[int, int, int] | None = (0, 0, 0),
+    bg_alpha: float = 0.6,
+    padding: int = 4,
+) -> np.ndarray:
+    """在 OpenCV 图像上绘制支持中文的文本"""
+    font = _get_font(font_size)
+    # 测量文本尺寸
+    pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(pil_img)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
+
+    x, y = position
+    # 绘制背景
+    if bg_color is not None:
+        overlay = img.copy()
+        cv2.rectangle(
+            overlay,
+            (x - padding, y - padding),
+            (x + text_w + padding, y + text_h + padding),
+            bg_color, -1,
+        )
+        cv2.addWeighted(overlay, bg_alpha, img, 1 - bg_alpha, 0, img)
+
+    # 重新从 img 创建 PIL 图像（含背景）
+    pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(pil_img)
+    # PIL 的颜色是 RGB，传入的是 BGR
+    draw.text((x, y), text, font=font, fill=(color[2], color[1], color[0]))
+    result = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+    return result
+
+
+def _draw_dashed_polyline(
+    img: np.ndarray,
+    pts: np.ndarray,
+    color: tuple,
+    thickness: int = 2,
+    gap: int = 10,
+) -> None:
+    """绘制虚线多边形边框"""
+    n = len(pts)
+    for i in range(n):
+        p1 = tuple(pts[i])
+        p2 = tuple(pts[(i + 1) % n])
+        dx = p2[0] - p1[0]
+        dy = p2[1] - p1[1]
+        dist = max(1, int(np.hypot(dx, dy)))
+        for j in range(0, dist, gap * 2):
+            s = j / dist
+            e = min((j + gap) / dist, 1.0)
+            sp = (int(p1[0] + dx * s), int(p1[1] + dy * s))
+            ep = (int(p1[0] + dx * e), int(p1[1] + dy * e))
+            cv2.line(img, sp, ep, color, thickness)
 
 
 @dataclass
 class DetectionResult:
     """检测结果"""
 
-    frame: np.ndarray  # 热力图叠加后的帧
+    frame: np.ndarray  # 叠加标注后的帧（无热力图）
     total_count: int  # 总人数
-    total_density: float  # 总密度（人/m²）
-    region_counts: dict[str, int] = field(default_factory=dict)  # 各区域人数
-    region_densities: dict[str, float] = field(default_factory=dict)  # 各区域密度（人/m²）
+    region_counts: dict[str, int] = field(default_factory=dict)
+    # Cross-line
+    crossline_in_count: int = 0
+    crossline_out_count: int = 0
+    crossline_stats: dict[str, dict[str, int | str]] = field(default_factory=dict)
+    crossline_counted_ids: list[int] = field(default_factory=list)
+    # 检测中心点（供外部使用）
+    detection_centers: list[tuple[int, int]] = field(default_factory=list)
+    smoothed_count: int = 0  # EMA 平滑后的人数
 
 
 class YOLOService:
-    """YOLO 检测服务 - 实时热力图 + 区域计数 + 物理密度分析"""
+    """YOLO 检测服务 — 追踪 + 区域计数 + Cross-line 计数"""
 
-    # 区域边框颜色列表 (BGR)
     REGION_COLORS = [
-        (246, 143, 59),   # 蓝色
-        (235, 192, 91),   # 青色
-        (225, 125, 47),   # 深蓝
-        (111, 191, 45),   # 绿色
-        (94, 106, 228),   # 红色
-        (180, 130, 220),  # 粉色
+        (246, 143, 59),
+        (235, 192, 91),
+        (225, 125, 47),
+        (111, 191, 45),
+        (94, 106, 228),
+        (180, 130, 220),
     ]
 
     def __init__(
         self,
         model_path: str | None = None,
         regions: dict[str, list[tuple]] | None = None,
+        crosslines: list[dict] | None = None,
         conf: float = 0.5,
         device: str = "cpu",
-        colormap: int = cv2.COLORMAP_JET,
+        classes: list[int] | None = None,
         region_line_thickness: int = 2,
-        region_physical_areas: dict[str, float] | None = None,
+        crossline_line_thickness: int = 2,
     ):
         """
         Args:
             model_path: 模型路径
-            regions: 区域定义 {"区域名": [(x1,y1), (x2,y2), ...]}
+            regions: 区域定义 {"区域名": [(x1,y1), ...]}
+            crosslines: Cross-line 配置 [{"name": ..., "line": [(x1,y1),(x2,y2)]}]
             conf: 置信度阈值
             device: 运行设备
-            colormap: 热力图 colormap
+            classes: 检测类别列表，如 [0] 或 [0, 1]
             region_line_thickness: 区域边框线条粗细
-            region_physical_areas: 各区域物理面积（m²），由 VLM 估算
+            crossline_line_thickness: 计数线线条粗细
         """
         model_path = model_path or settings.YOLO_MODEL_PATH
+        self._classes = classes if classes else [0]
 
         logger.info(f"[YOLO] 初始化 YOLOService")
-        logger.info(f"[YOLO] model_path = {model_path}")
-        logger.info(f"[YOLO] model_path exists = {Path(model_path).exists()}")
-        logger.info(f"[YOLO] model_path absolute = {Path(model_path).absolute()}")
-        logger.info(f"[YOLO] conf = {conf}, device = {device}")
+        logger.info(f"[YOLO] model_path = {model_path}, exists = {Path(model_path).exists()}")
+        logger.info(f"[YOLO] conf = {conf}, device = {device}, classes = {self._classes}")
         logger.info(f"[YOLO] regions = {list(regions.keys()) if regions else 'None'}")
-        logger.info(f"[YOLO] physical_areas = {region_physical_areas}")
+        logger.info(f"[YOLO] crosslines = {len(crosslines) if crosslines else 0}")
 
         self.regions = regions or {}
+        self.crosslines = crosslines or []
         self.conf = conf
         self.device = device
         self.region_line_thickness = region_line_thickness
+        self.crossline_line_thickness = crossline_line_thickness
 
-        # 区域物理面积（m²）
-        self.region_physical_areas: dict[str, float] = region_physical_areas or {}
-
-        # 预计算各区域像素面积（用于兼容）
-        self.region_areas: dict[str, float] = {}
-        for name, polygon in self.regions.items():
-            self.region_areas[name] = calculate_polygon_area(polygon)
-
-        # 直接加载 YOLO 模型（替代 solutions.Heatmap）
         self.model = YOLO(model_path)
+        self._track_history: dict[int, list[tuple[int, int]]] = defaultdict(list)
+        self._crossline_states: dict[str, dict] = {
+            self._crossline_id(crossline): {
+                "name": crossline.get("name", "计数线"),
+                "in_count": 0,
+                "out_count": 0,
+                "counted_ids": set(),
+            }
+            for crossline in self.crosslines
+        }
 
-        # 实时热力图渲染器
-        self.heatmap_renderer = RealtimeHeatmapRenderer(
-            colormap=colormap,
-            alpha=0.5,
-            sigma=40,
-        )
+        # EMA 平滑状态
+        self._ema_alpha = 0.3
+        self._ema_count: float = 0.0
 
-        # 区域计数（如果有区域定义）
+        # 区域计数
         common_args = {
             "model": model_path,
             "conf": conf,
             "device": device,
-            "classes": [0],  # 只检测 person
+            "classes": self._classes,
             "show": False,
             "verbose": False,
             "show_in": False,
@@ -126,121 +221,112 @@ class YOLOService:
                 **common_args
             )
 
+    @staticmethod
+    def _crossline_id(crossline: dict) -> str:
+        """获取计数线主键，缺失时回退到名称。"""
+        return str(crossline.get("line_id") or crossline.get("name") or "crossline")
+
+    def _append_track_center(self, track_id: int, center: tuple[int, int]) -> tuple[int, int] | None:
+        """维护每个 track 的历史中心点，返回上一帧中心点。"""
+        history = self._track_history[track_id]
+        previous = history[-1] if history else None
+        history.append(center)
+        if len(history) > 30:
+            history.pop(0)
+        return previous
+
+    def _count_crossline(
+        self,
+        crossline: dict,
+        track_id: int,
+        current_centroid: tuple[int, int],
+        prev_position: tuple[int, int] | None,
+    ) -> None:
+        """基于薄矩形检测带统计单条计数线。"""
+        line_id = self._crossline_id(crossline)
+        state = self._crossline_states[line_id]
+
+        if prev_position is None or current_centroid == prev_position or track_id in state["counted_ids"]:
+            return
+
+        region = crossline.get("region", [])
+        if len(region) < 3:
+            return
+
+        region_pts = np.array(region, dtype=np.float32)
+        if cv2.pointPolygonTest(region_pts, current_centroid, False) < 0:
+            return
+
+        region_width = max(p[0] for p in region) - min(p[0] for p in region)
+        region_height = max(p[1] for p in region) - min(p[1] for p in region)
+        positive_motion = (
+            (region_width < region_height and current_centroid[0] > prev_position[0])
+            or (region_width >= region_height and current_centroid[1] > prev_position[1])
+        )
+
+        is_in = positive_motion
+        if crossline.get("direction") == "out":
+            is_in = not is_in
+
+        if is_in:
+            state["in_count"] += 1
+        else:
+            state["out_count"] += 1
+        state["counted_ids"].add(track_id)
+
+    def _collect_crossline_stats(self, tracked_objects: list[tuple[int, tuple[int, int]]]) -> dict[str, dict[str, int | str]]:
+        """计算所有计数线的独立累计统计。"""
+        if not self.crosslines:
+            return {}
+
+        for track_id, center in tracked_objects:
+            prev_position = self._append_track_center(track_id, center)
+            for crossline in self.crosslines:
+                self._count_crossline(crossline, track_id, center, prev_position)
+
+        return {
+            line_id: {
+                "name": state["name"],
+                "in_count": state["in_count"],
+                "out_count": state["out_count"],
+                "net_flow": state["in_count"] - state["out_count"],
+            }
+            for line_id, state in self._crossline_states.items()
+        }
+
     def _draw_regions(self, frame: np.ndarray, region_counts: dict[str, int]) -> np.ndarray:
-        """
-        在帧上绘制区域边框和区域人数（显示在区域右上角）
-
-        Args:
-            frame: 输入帧
-            region_counts: 各区域人数
-
-        Returns:
-            绘制后的帧
-        """
+        """在帧上绘制区域边框和区域人数（虚线风格 + 半透明填充）"""
         result = frame.copy()
 
         for idx, (name, polygon) in enumerate(self.regions.items()):
             color = self.REGION_COLORS[idx % len(self.REGION_COLORS)]
             pts = np.array(polygon, dtype=np.int32)
 
-            # 绘制区域边框（细线）
-            cv2.polylines(result, [pts], isClosed=True, color=color, thickness=self.region_line_thickness)
+            # 半透明区域填充
+            overlay = result.copy()
+            cv2.fillPoly(overlay, [pts], color)
+            cv2.addWeighted(overlay, 0.08, result, 0.92, 0, result)
 
-            # 找到区域右上角位置（x最大且y最小的点附近）
-            x_min, y_min = pts.min(axis=0)
-            x_max, y_max = pts.max(axis=0)
+            # 虚线边框
+            _draw_dashed_polyline(result, pts, color, self.region_line_thickness, gap=10)
 
-            # 右上角位置
-            label_x = x_max
-            label_y = y_min
-
-            # 绘制人数（使用纯数字，避免中文问号问题）
-            count = region_counts.get(name, 0)
-            label = str(count)
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.7
-            thickness = 2
-
-            # 获取文本大小
-            (text_w, text_h), baseline = cv2.getTextSize(label, font, font_scale, thickness)
-
-            # 调整位置使标签在区域内右上角
-            padding = 6
-            box_x1 = label_x - text_w - padding * 2
-            box_y1 = label_y
-            box_x2 = label_x
-            box_y2 = label_y + text_h + padding * 2
-
-            # 绘制背景矩形
-            cv2.rectangle(
-                result,
-                (box_x1, box_y1),
-                (box_x2, box_y2),
-                color,
-                -1
+            # 右上角区域名称标签（不显示人数）
+            x_max = pts[:, 0].max()
+            y_min = pts[:, 1].min()
+            result = _put_chinese_text(
+                result, name,
+                position=(x_max - len(name) * 8 - 8, y_min + 4),
+                font_size=16,
+                color=(255, 255, 255),
+                bg_color=color,
+                bg_alpha=0.75,
+                padding=5,
             )
-
-            # 绘制文本
-            cv2.putText(
-                result,
-                label,
-                (box_x1 + padding, box_y2 - padding),
-                font,
-                font_scale,
-                (255, 255, 255),
-                thickness,
-                cv2.LINE_AA
-            )
-
-        return result
-
-    def _draw_detections(self, frame: np.ndarray, boxes: np.ndarray, confs: np.ndarray) -> np.ndarray:
-        """
-        在帧上绘制检测框和置信度
-
-        Args:
-            frame: 输入帧
-            boxes: 检测框 [[x1,y1,x2,y2], ...]
-            confs: 置信度列表
-
-        Returns:
-            绘制后的帧
-        """
-        result = frame.copy()
-
-        for i, box in enumerate(boxes):
-            x1, y1, x2, y2 = map(int, box[:4])
-
-            # 绘制检测框（绿色）
-            cv2.rectangle(result, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-            # 绘制置信度标签
-            if i < len(confs):
-                conf = confs[i]
-                label = f"{conf:.2f}"
-                font = cv2.FONT_HERSHEY_SIMPLEX
-                font_scale = 0.5
-                thickness = 1
-                (text_w, text_h), _ = cv2.getTextSize(label, font, font_scale, thickness)
-
-                # 背景矩形
-                cv2.rectangle(result, (x1, y1 - text_h - 4), (x1 + text_w + 4, y1), (0, 255, 0), -1)
-                # 文本
-                cv2.putText(result, label, (x1 + 2, y1 - 2), font, font_scale, (0, 0, 0), thickness, cv2.LINE_AA)
 
         return result
 
     def _draw_total_count(self, frame: np.ndarray, total_count: int) -> np.ndarray:
-        """
-        在右上角绘制总人数
-
-        Args:
-            frame: 输入帧
-            total_count: 总人数
-
-        Returns:
-            绘制后的帧
-        """
+        """在右上角绘制总人数"""
         result = frame.copy()
         h, w = result.shape[:2]
 
@@ -248,128 +334,119 @@ class YOLOService:
         font = cv2.FONT_HERSHEY_SIMPLEX
         font_scale = 0.8
         thickness = 2
-
-        # 获取文本大小
         (text_w, text_h), baseline = cv2.getTextSize(label, font, font_scale, thickness)
 
-        # 右上角位置
         padding = 8
         margin = 10
         x = w - text_w - padding * 2 - margin
         y = margin
 
-        # 绘制背景矩形（半透明效果）
         overlay = result.copy()
-        cv2.rectangle(
-            overlay,
-            (x, y),
-            (x + text_w + padding * 2, y + text_h + padding * 2),
-            (0, 0, 0),
-            -1
-        )
+        cv2.rectangle(overlay, (x, y), (x + text_w + padding * 2, y + text_h + padding * 2), (0, 0, 0), -1)
         cv2.addWeighted(overlay, 0.6, result, 0.4, 0, result)
+        cv2.putText(result, label, (x + padding, y + text_h + padding),
+                    font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
 
-        # 绘制文本
-        cv2.putText(
-            result,
-            label,
-            (x + padding, y + text_h + padding),
-            font,
-            font_scale,
-            (255, 255, 255),
-            thickness,
-            cv2.LINE_AA
-        )
+        return result
+
+    def _draw_crosslines(self, frame: np.ndarray) -> np.ndarray:
+        """在帧上绘制计数线（实线 + 箭头 + 名称标签）"""
+        result = frame.copy()
+        for idx, cl in enumerate(self.crosslines):
+            line_pts = cl.get("line", [])
+            if len(line_pts) < 2:
+                continue
+            pt1 = (int(line_pts[0][0]), int(line_pts[0][1]))
+            pt2 = (int(line_pts[1][0]), int(line_pts[1][1]))
+            color = (0, 220, 255)  # 青黄色，与区域虚线区分
+
+            # 粗实线
+            cv2.line(result, pt1, pt2, color, self.crossline_line_thickness + 1)
+            # 两端圆点
+            cv2.circle(result, pt1, 5, color, -1)
+            cv2.circle(result, pt2, 5, color, -1)
+
+            # 线段中点标注名称
+            mid_x = (pt1[0] + pt2[0]) // 2
+            mid_y = (pt1[1] + pt2[1]) // 2
+            name = cl.get("name", f"Line {idx + 1}")
+            result = _put_chinese_text(
+                result, name,
+                position=(mid_x - len(name) * 6, mid_y - 22),
+                font_size=15,
+                color=color,
+                bg_color=(0, 0, 0),
+                bg_alpha=0.55,
+                padding=4,
+            )
 
         return result
 
     def process(self, frame: np.ndarray) -> DetectionResult:
         """
-        处理单帧，返回热力图、区域计数和密度
+        处理单帧，返回追踪结果、区域计数和 cross-line 计数。
 
-        Args:
-            frame: BGR 图像帧
-
-        Returns:
-            DetectionResult: 热力图帧 + 区域人数统计 + 密度（人/m²）
+        不包含热力图渲染（由 DMCountService 负责）。
         """
-        # 1. YOLO 推理 — 直接调用模型（替代 solutions.Heatmap）
+        # 1. YOLO 推理
         results = self.model.track(
-            frame,
-            persist=True,
-            classes=[0],
-            conf=self.conf,
-            device=self.device,
-            verbose=False,
+            frame, persist=True, classes=self._classes, conf=self.conf,
+            device=self.device, verbose=False,
         )
 
         # 2. 提取检测框和中心点
-        boxes = np.empty((0, 4))
-        confs = np.array([])
         detection_centers: list[tuple[int, int]] = []
+        tracked_objects: list[tuple[int, tuple[int, int]]] = []
+        total_count = 0
 
         if results and len(results) > 0 and results[0].boxes is not None:
             boxes_data = results[0].boxes
             if len(boxes_data) > 0:
                 boxes = boxes_data.xyxy.cpu().numpy()
-                confs = boxes_data.conf.cpu().numpy()
-
-                # 计算每个检测框的中心点（用于热力图）
-                for box in boxes:
+                track_ids = boxes_data.id.int().cpu().tolist() if boxes_data.id is not None else []
+                total_count = len(boxes)
+                for idx, box in enumerate(boxes):
                     cx = int((box[0] + box[2]) / 2)
                     cy = int((box[1] + box[3]) / 2)
-                    detection_centers.append((cx, cy))
+                    center = (cx, cy)
+                    detection_centers.append(center)
+                    if idx < len(track_ids):
+                        tracked_objects.append((track_ids[idx], center))
 
-        # 3. 生成实时热力图（纯快照，无累积）
-        output_frame = self.heatmap_renderer.render(frame, detection_centers)
-
-        # 4. 叠加检测框
-        output_frame = self._draw_detections(output_frame, boxes, confs)
-
-        # 5. 区域计数 + 密度计算
-        total_count = len(detection_centers)
+        # 3. 区域计数
         region_counts = {}
-        region_densities = {}
+        output_frame = frame.copy()
 
         if self.region_counter:
-            # 使用帧副本，避免 RegionCounter 修改原始帧或共享状态
             region_result = self.region_counter(frame.copy())
             total_count = region_result.total_tracks
             region_counts = dict(region_result.region_counts) if region_result.region_counts else {}
-
-            # 计算各区域物理密度（人/m²）
-            for name in self.regions.keys():
-                count = region_counts.get(name, 0)
-                area_m2 = self.region_physical_areas.get(name, 0)
-                if area_m2 > 0:
-                    region_densities[name] = calculate_density(
-                        count, area_m2,
-                        max_value=settings.DENSITY_MAX
-                    )
-                else:
-                    # 无物理面积时不输出密度
-                    region_densities[name] = 0.0
-
-            # 在热力图上叠加区域边框和人数
             output_frame = self._draw_regions(output_frame, region_counts)
         else:
-            # 无区域时显示右上角总人数
             output_frame = self._draw_total_count(output_frame, total_count)
 
-        # 6. 计算总体密度
-        total_physical_area = sum(self.region_physical_areas.values()) if self.region_physical_areas else 0
-        if total_physical_area > 0:
-            total_density = calculate_density(
-                total_count, total_physical_area,
-                max_value=settings.DENSITY_MAX
-            )
-        else:
-            total_density = 0.0
+        # 4. Cross-line 计数
+        crossline_stats = self._collect_crossline_stats(tracked_objects)
+        crossline_in = sum(int(item["in_count"]) for item in crossline_stats.values())
+        crossline_out = sum(int(item["out_count"]) for item in crossline_stats.values())
+        crossline_ids = sorted({
+            track_id
+            for state in self._crossline_states.values()
+            for track_id in state["counted_ids"]
+        })
+
+        # EMA 平滑
+        self._ema_count = self._ema_alpha * total_count + (1 - self._ema_alpha) * self._ema_count
+        smoothed = round(self._ema_count)
 
         return DetectionResult(
             frame=output_frame,
             total_count=total_count,
-            total_density=total_density,
             region_counts=region_counts,
-            region_densities=region_densities,
+            smoothed_count=smoothed,
+            crossline_in_count=crossline_in,
+            crossline_out_count=crossline_out,
+            crossline_stats=crossline_stats,
+            crossline_counted_ids=crossline_ids,
+            detection_centers=detection_centers,
         )

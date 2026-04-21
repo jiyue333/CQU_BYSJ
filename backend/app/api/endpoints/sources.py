@@ -9,9 +9,11 @@ import json
 import shutil
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import cv2
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -115,20 +117,9 @@ async def add_stream(
     """接入摄像头/推流地址"""
     source_id = str(uuid.uuid4())
 
-    # 验证流地址可访问性（可选）
+    # 流地址不在创建时验证（避免阻塞请求），在分析启动时验证
     video_width, video_height, video_fps = None, None, None
-    try:
-        cap = cv2.VideoCapture(request.url)
-        if cap.isOpened():
-            video_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            video_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            video_fps = cap.get(cv2.CAP_PROP_FPS)
-            cap.release()
-            logger.info(f"流地址验证成功: {request.url}")
-        else:
-            logger.warning(f"无法打开流地址: {request.url}")
-    except Exception as e:
-        logger.warning(f"验证流地址失败: {e}")
+    logger.info(f"流数据源地址: {request.url}（将在分析启动时验证连接）")
 
     # 创建数据库记录
     repo = VideoSourceRepository(db)
@@ -141,6 +132,7 @@ async def add_stream(
         video_width=video_width,
         video_height=video_height,
         video_fps=video_fps,
+        scene_area_m2=request.scene_area_m2,
     )
     repo.create(source)
 
@@ -182,6 +174,31 @@ async def list_sources(
             sources=[VideoSourceResponse.model_validate(s) for s in sources]
         )
     )
+
+
+class SourceUpdate(BaseModel):
+    """数据源更新请求"""
+    scene_area_m2: Optional[float] = None
+
+
+@router.patch("/{source_id}", response_model=ApiResponse[VideoSourceResponse])
+async def update_source(
+    source_id: str,
+    request: SourceUpdate,
+    db: Session = Depends(get_db),
+):
+    """更新数据源（如物理面积）"""
+    repo = VideoSourceRepository(db)
+    source = repo.get_by_id(source_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="数据源不存在")
+
+    if request.scene_area_m2 is not None:
+        source.scene_area_m2 = request.scene_area_m2
+        db.commit()
+        db.refresh(source)
+
+    return ApiResponse.success(data=VideoSourceResponse.model_validate(source))
 
 
 @router.delete("/{source_id}", response_model=ApiResponse)

@@ -21,7 +21,7 @@ from app.core.logger import logger
 from app.models import ExportTask
 from app.repositories import StatsRepository, VideoSourceRepository, ExportTaskRepository
 from app.schemas.common import ApiResponse
-from app.schemas.history import HistorySeriesItem, HistoryResponse, RegionHistoryStats
+from app.schemas.history import CrossLineHistoryStats, HistorySeriesItem, HistoryResponse, RegionHistoryStats
 from app.schemas.export import ExportResponse
 
 router = APIRouter(tags=["历史与导出"])
@@ -67,6 +67,15 @@ async def get_history(
                 total_density_avg=r.density_avg,
             )
 
+        crosslines_data = {}
+        crossline_stats_dict = s.get_crossline_stats_dict()
+        for line_id, c in crossline_stats_dict.items():
+            crosslines_data[line_id] = CrossLineHistoryStats(
+                name=c.name,
+                in_total=c.in_total,
+                out_total=c.out_total,
+            )
+
         series.append(
             HistorySeriesItem(
                 time=s.time_bucket,
@@ -74,6 +83,9 @@ async def get_history(
                 total_count_max=s.total_count_max,
                 total_count_min=s.total_count_min,
                 total_density_avg=s.total_density_avg,
+                crossline_in_total=s.crossline_in_total or 0,
+                crossline_out_total=s.crossline_out_total or 0,
+                crossline_stats=crosslines_data,
                 regions=regions_data,
             )
         )
@@ -114,12 +126,13 @@ async def export_data(
 
     # 生成文件名
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    filename = f"export_{source.name}_{timestamp}.{format}"
+    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in (source.name or source_id))
+    filename = f"export_{safe_name}_{timestamp}.{format}"
     file_path = export_dir / filename
 
     # 导出 CSV
     if format == "csv":
-        with open(file_path, "w", newline="", encoding="utf-8") as f:
+        with open(file_path, "w", newline="", encoding="utf-8-sig") as f:
             writer = csv.writer(f)
             writer.writerow(["时间", "平均人数", "平均密度", "最大人数", "最小人数"])
             for s in stats:

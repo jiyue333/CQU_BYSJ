@@ -74,7 +74,14 @@ class VideoService:
 
     def open(self) -> bool:
         """打开视频源"""
-        self.cap = cv2.VideoCapture(self.source)
+        if self.source_type == SourceType.STREAM:
+            # RTSP/RTMP: 使用 FFMPEG 后端，设置超时和缓冲
+            self.cap = cv2.VideoCapture(self.source, cv2.CAP_FFMPEG)
+            self.cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 10000)  # 10s 连接超时
+            self.cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 10000)  # 10s 读取超时
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)  # 减少缓冲延迟
+        else:
+            self.cap = cv2.VideoCapture(self.source)
         return self.cap.isOpened()
 
     def close(self) -> None:
@@ -105,14 +112,32 @@ class VideoService:
         )
 
     def frames(self) -> Generator[np.ndarray, None, None]:
-        """逐帧迭代器"""
+        """逐帧迭代器（流协议自动重试）"""
         if not self.cap or not self.cap.isOpened():
             raise RuntimeError("视频源未打开")
+
+        consecutive_failures = 0
+        max_failures = 5 if self.source_type == SourceType.STREAM else 1
 
         while True:
             success, frame = self.cap.read()
             if not success:
-                break
+                consecutive_failures += 1
+                if consecutive_failures >= max_failures:
+                    # 流模式：尝试重连一次
+                    if self.source_type == SourceType.STREAM:
+                        self.cap.release()
+                        self.cap = cv2.VideoCapture(self.source, cv2.CAP_FFMPEG)
+                        self.cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 10000)
+                        self.cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 10000)
+                        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
+                        if not self.cap.isOpened():
+                            break
+                        consecutive_failures = 0
+                        continue
+                    break
+                continue
+            consecutive_failures = 0
             yield frame
 
     def __enter__(self) -> "VideoService":

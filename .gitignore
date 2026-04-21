@@ -158,3 +158,10 @@ dataset/*
 YOLO-CROWD/
 runs/
 train/dataset
+screenshots/
+*.zip
+state/log
+log
+.github/
+.state/
+*.pt

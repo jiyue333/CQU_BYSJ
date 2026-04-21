@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     YOLO_MODEL_PATH: str = str(_PROJECT_ROOT / "yolo11n.pt")
     YOLO_CONF_THRESHOLD: float = 0.5
     YOLO_DEVICE: str = "cpu"  # cpu / cuda / mps
+    YOLO_CLASSES: str = "0"  # 检测类别，逗号分隔，如 "0" 或 "0,1"
 
     # WebSocket 配置
     WS_HEARTBEAT_INTERVAL: int = 30  # 秒
@@ -54,15 +55,15 @@ class Settings(BaseSettings):
     # 注意：告警阈值现在通过前端在每个区域（Region）中单独配置
     ALERT_COOLDOWN_SECONDS: int = 30  # 同一区域告警冷却时间（秒）
 
-    # 密度计算配置
-    # 密度 = 人数 / 物理面积(m²)，物理面积由 VLM 估算
-    DENSITY_MAX: float = 20.0  # 密度上限（人/m²），20人/m²已是极端拥挤
+    # DM-Count 密度图配置
+    DMCOUNT_MODEL_NAME: str = "DM-Count"
+    DMCOUNT_MODEL_WEIGHTS: str = "QNRF"  # SHA / SHB / QNRF — QNRF 场景多样性最好
+    DMCOUNT_INTERVAL_SEC: float = 1.0  # DM-Count 运行间隔（秒），同时控制画面推送频率
 
-    # VLM 面积估算配置
-    VLM_API_KEY: Optional[str] = None
-    VLM_MODEL: str = "gpt-4o"
-    VLM_BASE_URL: str = "https://api.openai.com/v1"
-    VLM_TIMEOUT: int = 60  # VLM 调用超时（秒）
+    # 推理流水线配置
+    # YOLO: 每帧都跑（追踪+计数），不参与画面渲染
+    # DM-Count: 按 DMCOUNT_INTERVAL_SEC 间隔运行，负责密度估计+热力图渲染+画面推送
+    WS_PUSH_FPS: int = 0  # WebSocket 推送帧率上限，0=跟随 DM-Count 间隔
 
     def get_database_url(self) -> str:
         """获取数据库 URL"""

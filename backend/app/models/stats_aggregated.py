@@ -47,6 +47,30 @@ class RegionStatsData:
         )
 
 
+class CrossLineStatsData:
+    """计数线统计数据结构"""
+
+    def __init__(self, name: str, in_total: int = 0, out_total: int = 0):
+        self.name = name
+        self.in_total = in_total
+        self.out_total = out_total
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "in_total": self.in_total,
+            "out_total": self.out_total,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CrossLineStatsData":
+        return cls(
+            name=str(data.get("name", "")),
+            in_total=int(data.get("in_total", 0)),
+            out_total=int(data.get("out_total", 0)),
+        )
+
+
 class StatsAggregated(Base):
     """聚合统计模型"""
 
@@ -76,6 +100,17 @@ class StatsAggregated(Base):
     # 格式: {"region_id": {"name": "前区", "avg": 50, "max": 65, "min": 40, "density_avg": 1.5}}
     region_stats: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True, comment="JSON 各区域统计"
+    )
+
+    # 计数线统计（累计值）
+    crossline_in_total: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, default=0, comment="计数线累计进入人数"
+    )
+    crossline_out_total: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, default=0, comment="计数线累计离开人数"
+    )
+    crossline_stats: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="JSON 各计数线统计"
     )
 
     # 其他指标（crowd_index_avg 已弃用，保留列以兼容旧数据）
@@ -131,6 +166,23 @@ class StatsAggregated(Base):
             if data.name == region_name:
                 return region_id, data
         return None
+
+    def get_crossline_stats_dict(self) -> dict[str, CrossLineStatsData]:
+        """解析 crossline_stats JSON 为字典 (key: line_id)"""
+        if not self.crossline_stats:
+            return {}
+        try:
+            raw = json.loads(self.crossline_stats) if isinstance(self.crossline_stats, str) else self.crossline_stats
+            return {line_id: CrossLineStatsData.from_dict(data) for line_id, data in raw.items()}
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    def set_crossline_stats_dict(self, data: dict[str, CrossLineStatsData]) -> None:
+        """将计数线统计字典序列化为 JSON"""
+        self.crossline_stats = json.dumps(
+            {line_id: stats.to_dict() for line_id, stats in data.items()},
+            ensure_ascii=False,
+        )
 
     def __repr__(self) -> str:
         return f"<StatsAggregated(id={self.stat_id}, bucket={self.time_bucket}, interval={self.interval_type})>"
