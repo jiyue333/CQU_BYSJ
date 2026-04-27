@@ -7,7 +7,7 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKEND_DIR="$PROJECT_ROOT/backend"
 FRONTEND_DIR="$PROJECT_ROOT/frontend"
 BACKEND_VENV="$BACKEND_DIR/.venv"
-LOG_DIR="$PROJECT_ROOT/log"
+LOG_DIR="$PROJECT_ROOT/logs"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

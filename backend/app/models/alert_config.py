@@ -48,9 +48,9 @@ class AlertConfig(Base):
         Integer, nullable=False, default=50, comment="默认区域严重阈值"
     )
 
-    # 自定义区域阈值（JSON）
+    # 旧版区域阈值（JSON，已弃用；区域模型字段为权威来源）
     region_thresholds: Mapped[Optional[str]] = mapped_column(
-        Text, nullable=True, comment="JSON 自定义区域阈值"
+        Text, nullable=True, comment="[已弃用] JSON 自定义区域阈值"
     )
 
     # 配置

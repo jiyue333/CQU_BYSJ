@@ -64,7 +64,7 @@ class AlertConfigRepository:
         region_thresholds: Optional[str] = None,
         cooldown_seconds: Optional[int] = None,
     ) -> Optional[AlertConfig]:
-        """更新阈值配置"""
+        """更新阈值配置（region_thresholds 仅保留兼容，不再作为权威来源）"""
         config = self.get_by_source_id(source_id)
         if not config:
             return None

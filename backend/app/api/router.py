@@ -15,7 +15,6 @@ from app.api.endpoints import (
     status_router,
     websocket_router,
 )
-from app.api.endpoints.crosslines import router as crosslines_router
 
 # 创建主路由
 api_router = APIRouter()
@@ -24,7 +23,6 @@ api_router = APIRouter()
 api_router.include_router(sources_router)
 api_router.include_router(analysis_router)
 api_router.include_router(regions_router)
-api_router.include_router(crosslines_router)
 api_router.include_router(alerts_router)
 api_router.include_router(history_router)
 api_router.include_router(status_router)

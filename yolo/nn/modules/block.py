@@ -2131,7 +2131,7 @@ class TridentBlock(nn.Module):
             pad = d
             out = F.conv2d(y, self.shared_weight, padding=pad, dilation=d)
             outs.append(self.act(bn(out)))
-        y = sum(outs)
+        y = um(outs)
         y = self.cv2(y)
         return x + y if self.add else y
 

@@ -6,7 +6,6 @@
 
 from app.models.video_source import VideoSource
 from app.models.region import Region
-from app.models.cross_line import CrossLine
 from app.models.alert_config import AlertConfig
 from app.models.alert import Alert
 from app.models.stats_aggregated import StatsAggregated
@@ -15,7 +14,6 @@ from app.models.export_task import ExportTask
 __all__ = [
     "VideoSource",
     "Region",
-    "CrossLine",
     "AlertConfig",
     "Alert",
     "StatsAggregated",

@@ -5,7 +5,6 @@
 """
 
 import csv
-import json
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -15,9 +14,8 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.config import settings
-from app.core.logger import logger
 from app.models import AlertConfig
-from app.repositories import AlertRepository, VideoSourceRepository, AlertConfigRepository
+from app.repositories import AlertRepository, VideoSourceRepository, AlertConfigRepository, RegionRepository
 from app.schemas.common import ApiResponse
 from app.schemas.alert import (
     AlertThresholdGet,
@@ -31,27 +29,18 @@ from app.schemas.alert import (
 router = APIRouter(prefix="/alerts", tags=["告警管理"])
 
 
-def _to_threshold_response(config: AlertConfig) -> AlertThresholdGet:
-    """将数据库配置转换为阈值响应"""
-    region_thresholds: dict[str, RegionThreshold] = {}
-    if config.region_thresholds:
-        try:
-            parsed = json.loads(config.region_thresholds)
-            if isinstance(parsed, dict):
-                for name, value in parsed.items():
-                    if not isinstance(name, str) or not isinstance(value, dict):
-                        continue
-                    warning = value.get("warning", config.default_region_warning)
-                    critical = value.get("critical", config.default_region_critical)
-                    if isinstance(warning, (int, float)) and isinstance(critical, (int, float)):
-                        region_thresholds[name] = RegionThreshold(
-                            name=name,
-                            warning=int(warning),
-                            critical=int(critical),
-                        )
-        except (json.JSONDecodeError, TypeError, ValueError):
-            logger.warning(f"预警配置解析失败: source_id={config.source_id}")
-
+def _to_threshold_response(config: AlertConfig, regions: list) -> AlertThresholdGet:
+    """将数据库配置转换为阈值响应。区域阈值以 Region 字段为准。"""
+    region_thresholds = {
+        region.region_id: RegionThreshold(
+            name=region.name,
+            count_warning=region.count_warning,
+            count_critical=region.count_critical,
+            density_warning=region.density_warning,
+            density_critical=region.density_critical,
+        )
+        for region in regions
+    }
     return AlertThresholdGet(
         total_warning_threshold=config.total_warning_threshold,
         total_critical_threshold=config.total_critical_threshold,
@@ -73,8 +62,10 @@ async def get_threshold(
         raise HTTPException(status_code=404, detail="数据源不存在")
 
     config_repo = AlertConfigRepository(db)
+    region_repo = RegionRepository(db)
     config = config_repo.get_or_create(source_id=source_id, config_id=str(uuid.uuid4()))
-    return ApiResponse.success(data=_to_threshold_response(config))
+    regions = region_repo.get_by_source_id(source_id)
+    return ApiResponse.success(data=_to_threshold_response(config, regions))
 
 
 @router.post("/threshold", response_model=ApiResponse[AlertThresholdGet])
@@ -88,9 +79,11 @@ async def update_threshold(
         raise HTTPException(status_code=404, detail="数据源不存在")
 
     config_repo = AlertConfigRepository(db)
+    region_repo = RegionRepository(db)
     config = config_repo.get_or_create(source_id=request.source_id, config_id=str(uuid.uuid4()))
+    regions = {region.region_id: region for region in region_repo.get_by_source_id(request.source_id)}
 
-    updates: dict[str, int | str | None] = {}
+    updates: dict[str, int | None] = {}
     if request.total_warning_threshold is not None:
         updates["total_warning_threshold"] = request.total_warning_threshold
     if request.total_critical_threshold is not None:
@@ -103,21 +96,27 @@ async def update_threshold(
         updates["cooldown_seconds"] = request.cooldown_seconds
     if "region_thresholds" in request.model_fields_set:
         if request.region_thresholds is None:
-            updates["region_thresholds"] = None
+            for region in regions.values():
+                region.count_warning = None
+                region.count_critical = None
+                region.density_warning = None
+                region.density_critical = None
         else:
-            region_payload = {
-                region_name: {
-                    "warning": threshold.warning,
-                    "critical": threshold.critical,
-                }
-                for region_name, threshold in request.region_thresholds.items()
-            }
-            updates["region_thresholds"] = json.dumps(region_payload, ensure_ascii=False)
+            for region_id, threshold in request.region_thresholds.items():
+                region = regions.get(region_id)
+                if region is None:
+                    continue
+                region.count_warning = threshold.count_warning
+                region.count_critical = threshold.count_critical
+                region.density_warning = threshold.density_warning
+                region.density_critical = threshold.density_critical
 
     if updates:
         config = config_repo.update(config, **updates)
+    if "region_thresholds" in request.model_fields_set:
+        db.commit()
 
-    return ApiResponse.success(data=_to_threshold_response(config))
+    return ApiResponse.success(data=_to_threshold_response(config, list(regions.values())))
 
 
 @router.get("/recent", response_model=ApiResponse[AlertRecentResponse])

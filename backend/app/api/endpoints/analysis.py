@@ -27,7 +27,6 @@ from app.repositories import (
     RegionRepository,
     AlertRepository,
 )
-from app.repositories.cross_line_repository import CrossLineRepository
 from app.schemas.common import ApiResponse, OkResponse
 from app.schemas.analysis import (
     AnalysisStartRequest,
@@ -38,10 +37,10 @@ from app.schemas.analysis import (
 from app.services.video import VideoService
 from app.services.detection import YOLOService, DetectionResult
 from app.services.density import DMCountService
-from app.services.alert import AlertService, RegionThresholdConfig
-from app.services.stats import stats_aggregator, CrossLineFrameStats, FrameStats, RegionFrameStats
+from app.services.alert import AlertService, RegionAlertMetrics, RegionThresholdConfig
+from app.services.stats import stats_aggregator, FrameStats, RegionFrameStats
 from app.api.endpoints.websocket import ws_manager
-from app.schemas.websocket import AlertMessage, CrossLineRealtimeStats, RealtimeFrame, RegionRealtimeStats
+from app.schemas.websocket import AlertMessage, RealtimeFrame, RegionRealtimeStats
 
 router = APIRouter(prefix="/analysis", tags=["分析控制"])
 
@@ -105,42 +104,6 @@ def _get_regions_dict(regions: list, img_width: int = 0, img_height: int = 0) ->
     return result
 
 
-def _get_crosslines_config(crosslines: list, img_width: int, img_height: int) -> list[dict]:
-    """将数据库 cross-line 转换为 YOLO ObjectCounter 需要的格式。
-
-    2 点线段自动扩展为薄矩形检测带（上下各 BAND 像素），
-    解决追踪 ID 不稳定时 LineString.intersects 无法检测穿越的问题。
-    """
-    BAND = 25  # 检测带半宽（像素）
-    result = []
-    for cl in crosslines:
-        x1 = int(cl.start_x * img_width / 100.0)
-        y1 = int(cl.start_y * img_height / 100.0)
-        x2 = int(cl.end_x * img_width / 100.0)
-        y2 = int(cl.end_y * img_height / 100.0)
-        # 计算线段法向量，沿法向扩展为薄矩形
-        dx = x2 - x1
-        dy = y2 - y1
-        length = max(1, (dx * dx + dy * dy) ** 0.5)
-        nx = -dy / length * BAND  # 法向 x
-        ny = dx / length * BAND   # 法向 y
-        region = [
-            (int(x1 + nx), int(y1 + ny)),
-            (int(x2 + nx), int(y2 + ny)),
-            (int(x2 - nx), int(y2 - ny)),
-            (int(x1 - nx), int(y1 - ny)),
-        ]
-        result.append({
-            "line_id": cl.line_id,
-            "name": cl.name,
-            "line": [(x1, y1), (x2, y2)],  # 原始线段（用于画线）
-            "region": region,               # 薄矩形（用于 ObjectCounter）
-            "direction": cl.direction,
-            "color": cl.color,
-        })
-    return result
-
-
 def _get_region_id_map(regions: list) -> dict[str, str]:
     """构建区域名称到 ID 的映射"""
     return {region.name: region.region_id for region in regions}
@@ -168,7 +131,7 @@ def load_reference_frame(source_id: str) -> Optional[np.ndarray]:
 async def _inference_loop(source_id: str) -> None:
     """
     推理循环主函数 — 双模型协同：
-    - YOLO: 每帧运行（追踪 + 区域计数 + cross-line）
+    - YOLO: 每帧运行（追踪 + 区域计数 + 区域进出累计）
     - DM-Count: 每 N 帧运行（密度图 + 人数估计）
     """
     logger.info(f"推理循环启动: {source_id}")
@@ -224,19 +187,15 @@ async def _inference_loop(source_id: str) -> None:
         regions = region_repo.get_by_source_id(source_id)
         regions_dict = _get_regions_dict(regions, video_info.width, video_info.height)
         region_id_map = _get_region_id_map(regions)
-
-        # 5. 获取 Cross-line 配置
-        crossline_repo = CrossLineRepository(db)
-        crosslines_db = crossline_repo.get_by_source_id(source_id)
-        crosslines_config = _get_crosslines_config(crosslines_db, video_info.width, video_info.height)
+        regions_by_name = {region.name: region for region in regions}
 
         logger.info(f"区域配置: {list(regions_dict.keys()) if regions_dict else '无'}")
-        logger.info(f"Cross-line 配置: {len(crosslines_config)} 条线段")
 
-        # 6. 构建区域阈值配置
+        # 5. 构建区域阈值配置
         region_threshold_configs = []
         for region in regions:
             region_threshold_configs.append(RegionThresholdConfig(
+                region_id=region.region_id,
                 region_name=region.name,
                 count_warning=region.count_warning,
                 count_critical=region.count_critical,
@@ -244,12 +203,11 @@ async def _inference_loop(source_id: str) -> None:
                 density_critical=region.density_critical,
             ))
 
-        # 7. 初始化服务
+        # 6. 初始化服务
         yolo_classes = [int(c.strip()) for c in settings.YOLO_CLASSES.split(",") if c.strip()]
         yolo_service = YOLOService(
             model_path=settings.YOLO_MODEL_PATH,
             regions=regions_dict if regions_dict else None,
-            crosslines=crosslines_config if crosslines_config else None,
             conf=settings.YOLO_CONF_THRESHOLD,
             device=settings.YOLO_DEVICE,
             classes=yolo_classes,
@@ -262,8 +220,8 @@ async def _inference_loop(source_id: str) -> None:
         alert_service.set_region_thresholds(region_threshold_configs)
         alert_repo = AlertRepository(db)
 
-        # 8. 推理循环
-        # 架构：YOLO 每帧静默运行（追踪+计数），DM-Count 按间隔运行（密度+渲染+推送）
+        # 7. 推理循环
+        # 架构：YOLO 每帧静默运行（追踪+区域计数+区域进出累计），DM-Count 按间隔运行（密度+渲染+推送）
         frame_count = 0
         last_flush_time = datetime.utcnow()
         last_dmcount_time = 0.0  # 上次 DM-Count 运行的 wall time
@@ -303,7 +261,7 @@ async def _inference_loop(source_id: str) -> None:
                 now = datetime.utcnow()
                 timestamp = now.isoformat() + "Z"
 
-                # === YOLO: 每帧静默运行（追踪 + 区域计数 + 计数线）===
+                # === YOLO: 每帧静默运行（追踪 + 区域计数 + 区域进出累计）===
                 result: DetectionResult = await loop.run_in_executor(
                     _yolo_executor, yolo_service.process, frame
                 )
@@ -328,22 +286,33 @@ async def _inference_loop(source_id: str) -> None:
                         should_render = False  # 失败时不推送
 
                 # === 告警检查（使用 DM-Count 数据，每帧检查）===
-                dm_counts_for_alert = {name: cached_region_dm_counts.get(name, 0.0) for name in regions_dict}
-                dm_densities_for_alert: dict[str, float] = {}
+                region_metrics_for_alert: dict[str, RegionAlertMetrics] = {}
                 # 定期刷新 source（支持运行中修改面积）
                 if (now - last_source_refresh).total_seconds() >= 5:
                     db.refresh(source)
                     last_source_refresh = now
                 scene_area = source.scene_area_m2 or 0.0
                 total_px = video_info.width * video_info.height if video_info.width and video_info.height else 1
-                for rname, ppoly in regions_dict.items():
-                    rpx = cv2.contourArea(np.array(ppoly, dtype=np.float32))
-                    ratio = rpx / total_px if total_px > 0 else 1.0
-                    area_m2 = scene_area * ratio if scene_area > 0 else 0.0
-                    dm_densities_for_alert[rname] = (
-                        cached_region_dm_counts.get(rname, 0.0) / area_m2 if area_m2 > 0 else 0.0
+                for region_name, polygon in regions_dict.items():
+                    region = regions_by_name.get(region_name)
+                    if region is None:
+                        continue
+                    pixel_area = cv2.contourArea(np.array(polygon, dtype=np.float32))
+                    ratio = pixel_area / total_px if total_px > 0 else 1.0
+                    area_m2 = (
+                        region.area_physical
+                        if region.area_physical and region.area_physical > 0
+                        else (scene_area * ratio if scene_area > 0 else 0.0)
                     )
-                alerts = alert_service.check(result, dm_counts_for_alert, dm_densities_for_alert)
+                    count_value = cached_region_dm_counts.get(region_name, 0.0)
+                    density_value = count_value / area_m2 if area_m2 > 0 else 0.0
+                    region_metrics_for_alert[region.region_id] = RegionAlertMetrics(
+                        region_id=region.region_id,
+                        region_name=region_name,
+                        count=count_value,
+                        density=density_value,
+                    )
+                alerts = alert_service.check(region_metrics_for_alert)
                 for alert in alerts:
                     alert_val = int(round(alert.current_value))
                     alert_th = int(round(alert.threshold))
@@ -352,7 +321,7 @@ async def _inference_loop(source_id: str) -> None:
                         source_id=source_id,
                         alert_type=alert.alert_type.value,
                         level=alert.level.value,
-                        region_id=region_id_map.get(alert.region_name) if alert.region_name else None,
+                        region_id=alert.region_id,
                         region_name=alert.region_name,
                         current_value=alert_val,
                         threshold=alert_th,
@@ -370,7 +339,7 @@ async def _inference_loop(source_id: str) -> None:
                         alert_id=alert.alert_id,
                         alert_type=alert.alert_type.value,
                         level=alert.level.value,
-                        region_id=region_id_map.get(alert.region_name) if alert.region_name else None,
+                        region_id=alert.region_id,
                         region_name=alert.region_name,
                         current_value=alert_val,
                         threshold=alert_th,
@@ -383,16 +352,26 @@ async def _inference_loop(source_id: str) -> None:
                 total_density = cached_dm_count / scene_area if scene_area > 0 else 0.0
                 region_frame_stats = []
                 for region_name, pixel_points in regions_dict.items():
+                    region = regions_by_name.get(region_name)
+                    if region is None:
+                        continue
                     dm_region_count = cached_region_dm_counts.get(region_name, 0.0)
                     region_pixel_area = cv2.contourArea(np.array(pixel_points, dtype=np.float32))
                     region_ratio = region_pixel_area / total_px if total_px > 0 else 1.0
-                    region_area_m2 = scene_area * region_ratio if scene_area > 0 else 0.0
+                    region_area_m2 = (
+                        region.area_physical
+                        if region.area_physical and region.area_physical > 0
+                        else (scene_area * region_ratio if scene_area > 0 else 0.0)
+                    )
                     region_density = dm_region_count / region_area_m2 if region_area_m2 > 0 else 0.0
+                    flow_stats = result.region_flow_stats.get(region_name, {})
                     region_frame_stats.append(RegionFrameStats(
-                        region_id=region_id_map.get(region_name, ""),
+                        region_id=region.region_id,
                         name=region_name,
                         count=int(round(dm_region_count)),
                         density=round(region_density, 2),
+                        in_total=int(flow_stats.get("in_total", 0)),
+                        out_total=int(flow_stats.get("out_total", 0)),
                     ))
 
                 frame_stats = FrameStats(
@@ -401,17 +380,6 @@ async def _inference_loop(source_id: str) -> None:
                     total_count=int(round(cached_dm_count)),
                     total_density=round(total_density, 2),
                     regions=region_frame_stats,
-                    crosslines=[
-                        CrossLineFrameStats(
-                            line_id=line_id,
-                            name=str(stats.get("name", line_id)),
-                            in_count=int(stats.get("in_count", 0)),
-                            out_count=int(stats.get("out_count", 0)),
-                        )
-                        for line_id, stats in result.crossline_stats.items()
-                    ],
-                    crossline_in_count=result.crossline_in_count,
-                    crossline_out_count=result.crossline_out_count,
                     dm_count_estimate=cached_dm_count,
                 )
                 stats_aggregator.collect(frame_stats)
@@ -422,36 +390,27 @@ async def _inference_loop(source_id: str) -> None:
 
                 # === WebSocket 推送（仅 DM-Count 触发时推送画面）===
                 if should_render and cached_heatmap_frame is not None:
-                    # 合成输出帧：热力图 + 区域标注 + 计数线
+                    # 合成输出帧：热力图 + 区域标注
                     output_frame = cached_heatmap_frame.copy()
                     if regions_dict:
                         output_frame = yolo_service._draw_regions(output_frame, result.region_counts)
                     else:
                         output_frame = yolo_service._draw_total_count(output_frame, result.total_count)
-                    if yolo_service.crosslines:
-                        output_frame = yolo_service._draw_crosslines(output_frame)
 
+                    _, source_buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
                     _, buffer = cv2.imencode(".jpg", output_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    source_frame_base64 = base64.b64encode(source_buffer).decode("utf-8")
                     frame_base64 = base64.b64encode(buffer).decode("utf-8")
 
                     regions_realtime: dict[str, RegionRealtimeStats] = {}
                     for rf in region_frame_stats:
                         regions_realtime[rf.region_id] = RegionRealtimeStats(
-                            total_count_avg=float(rf.count),
-                            total_count_max=rf.count,
-                            total_count_min=rf.count,
-                            total_density_avg=rf.density,
+                            name=rf.name,
+                            count=rf.count,
+                            density=rf.density,
+                            in_total=rf.in_total,
+                            out_total=rf.out_total,
                         )
-
-                    crosslines_realtime = {
-                        line_id: CrossLineRealtimeStats(
-                            name=str(stats.get("name", line_id)),
-                            in_count=int(stats.get("in_count", 0)),
-                            out_count=int(stats.get("out_count", 0)),
-                            net_flow=int(stats.get("net_flow", 0)),
-                        )
-                        for line_id, stats in result.crossline_stats.items()
-                    }
 
                     density_matrix_list: list[list[float]] = []
                     if cached_density_map is not None:
@@ -461,14 +420,11 @@ async def _inference_loop(source_id: str) -> None:
                     realtime_frame = RealtimeFrame(
                         ts=timestamp,
                         frame=frame_base64,
+                        source_frame=source_frame_base64,
                         total_count=int(round(cached_dm_count)),
                         total_density=total_density,
                         dm_count_estimate=cached_dm_count,
                         regions=regions_realtime,
-                        crossline_in_count=result.crossline_in_count,
-                        crossline_out_count=result.crossline_out_count,
-                        crossline_stats=crosslines_realtime,
-                        crossline_counted_ids=result.crossline_counted_ids[-20:],
                         density_matrix=density_matrix_list,
                     )
                     await ws_manager.send_frame(source_id, realtime_frame)
@@ -526,6 +482,7 @@ async def start_analysis(
         "status": "running",
         "start_time": datetime.utcnow().isoformat() + "Z",
     }
+    stats_aggregator.clear(request.source_id)
 
     task = asyncio.create_task(_inference_loop(request.source_id))
     _tasks[request.source_id] = task

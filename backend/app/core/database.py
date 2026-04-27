@@ -63,14 +63,12 @@ def init_db() -> None:
     settings.ensure_dirs()
 
     # 导入所有模型，确保它们被注册到 Base.metadata
-    from app.models import (  # noqa: F401
-        VideoSource,
-        Region,
-        AlertConfig,
-        Alert,
-        StatsAggregated,
-        ExportTask,
-    )
+    from app.models.video_source import VideoSource  # noqa: F401
+    from app.models.region import Region  # noqa: F401
+    from app.models.alert_config import AlertConfig  # noqa: F401
+    from app.models.alert import Alert  # noqa: F401
+    from app.models.stats_aggregated import StatsAggregated  # noqa: F401
+    from app.models.export_task import ExportTask  # noqa: F401
 
     # 创建所有表
     Base.metadata.create_all(bind=engine)
@@ -79,16 +77,6 @@ def init_db() -> None:
     with engine.connect() as conn:
         from sqlalchemy import inspect as sa_inspect, text
         inspector = sa_inspect(engine)
-        if "stats_aggregated" in inspector.get_table_names():
-            existing = {col["name"] for col in inspector.get_columns("stats_aggregated")}
-            if "crossline_in_total" not in existing:
-                conn.execute(text("ALTER TABLE stats_aggregated ADD COLUMN crossline_in_total INTEGER DEFAULT 0"))
-            if "crossline_out_total" not in existing:
-                conn.execute(text("ALTER TABLE stats_aggregated ADD COLUMN crossline_out_total INTEGER DEFAULT 0"))
-            if "crossline_stats" not in existing:
-                conn.execute(text("ALTER TABLE stats_aggregated ADD COLUMN crossline_stats TEXT"))
-            conn.commit()
-
         if "alerts" in inspector.get_table_names():
             create_sql = conn.execute(
                 text("SELECT sql FROM sqlite_master WHERE type='table' AND name='alerts'")

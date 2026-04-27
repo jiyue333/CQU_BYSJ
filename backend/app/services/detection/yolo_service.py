@@ -3,8 +3,8 @@ YOLO 检测服务
 
 职责：
 - 人物检测与追踪（model.track）
-- 多区域实时人数统计（solutions.RegionCounter）
-- Cross-line 单向计数（solutions.ObjectCounter）
+- 多区域实时人数统计
+- 按区域边界统计独立进出累计
 - 区域边框和人数叠加显示
 
 注意：密度图/热力图由 DMCountService 负责，本服务不再处理。
@@ -21,7 +21,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 warnings.filterwarnings("ignore", message=".*No tracks found.*")
 
-from ultralytics import YOLO, solutions
+from ultralytics import YOLO
 
 from app.core.config import settings
 from app.core.logger import logger
@@ -122,18 +122,14 @@ class DetectionResult:
     frame: np.ndarray  # 叠加标注后的帧（无热力图）
     total_count: int  # 总人数
     region_counts: dict[str, int] = field(default_factory=dict)
-    # Cross-line
-    crossline_in_count: int = 0
-    crossline_out_count: int = 0
-    crossline_stats: dict[str, dict[str, int | str]] = field(default_factory=dict)
-    crossline_counted_ids: list[int] = field(default_factory=list)
+    region_flow_stats: dict[str, dict[str, int]] = field(default_factory=dict)
     # 检测中心点（供外部使用）
     detection_centers: list[tuple[int, int]] = field(default_factory=list)
     smoothed_count: int = 0  # EMA 平滑后的人数
 
 
 class YOLOService:
-    """YOLO 检测服务 — 追踪 + 区域计数 + Cross-line 计数"""
+    """YOLO 检测服务 — 追踪 + 区域计数 + 区域进出累计"""
 
     REGION_COLORS = [
         (246, 143, 59),
@@ -148,23 +144,19 @@ class YOLOService:
         self,
         model_path: str | None = None,
         regions: dict[str, list[tuple]] | None = None,
-        crosslines: list[dict] | None = None,
         conf: float = 0.5,
         device: str = "cpu",
         classes: list[int] | None = None,
         region_line_thickness: int = 2,
-        crossline_line_thickness: int = 2,
     ):
         """
         Args:
             model_path: 模型路径
             regions: 区域定义 {"区域名": [(x1,y1), ...]}
-            crosslines: Cross-line 配置 [{"name": ..., "line": [(x1,y1),(x2,y2)]}]
             conf: 置信度阈值
             device: 运行设备
             classes: 检测类别列表，如 [0] 或 [0, 1]
             region_line_thickness: 区域边框线条粗细
-            crossline_line_thickness: 计数线线条粗细
         """
         model_path = model_path or settings.YOLO_MODEL_PATH
         self._classes = classes if classes else [0]
@@ -173,125 +165,57 @@ class YOLOService:
         logger.info(f"[YOLO] model_path = {model_path}, exists = {Path(model_path).exists()}")
         logger.info(f"[YOLO] conf = {conf}, device = {device}, classes = {self._classes}")
         logger.info(f"[YOLO] regions = {list(regions.keys()) if regions else 'None'}")
-        logger.info(f"[YOLO] crosslines = {len(crosslines) if crosslines else 0}")
 
         self.regions = regions or {}
-        self.crosslines = crosslines or []
         self.conf = conf
         self.device = device
         self.region_line_thickness = region_line_thickness
-        self.crossline_line_thickness = crossline_line_thickness
 
         self.model = YOLO(model_path)
-        self._track_history: dict[int, list[tuple[int, int]]] = defaultdict(list)
-        self._crossline_states: dict[str, dict] = {
-            self._crossline_id(crossline): {
-                "name": crossline.get("name", "计数线"),
-                "in_count": 0,
-                "out_count": 0,
-                "counted_ids": set(),
-            }
-            for crossline in self.crosslines
+        self._region_polygons: dict[str, np.ndarray] = {
+            name: np.array(points, dtype=np.float32)
+            for name, points in self.regions.items()
+        }
+        self._track_region_presence: dict[int, dict[str, bool]] = defaultdict(dict)
+        self._region_flow_states: dict[str, dict[str, int]] = {
+            name: {"in_total": 0, "out_total": 0}
+            for name in self.regions
         }
 
         # EMA 平滑状态
         self._ema_alpha = 0.3
         self._ema_count: float = 0.0
 
-        # 区域计数
-        common_args = {
-            "model": model_path,
-            "conf": conf,
-            "device": device,
-            "classes": self._classes,
-            "show": False,
-            "verbose": False,
-            "show_in": False,
-            "show_out": False,
-            "iou": 0.85,
-        }
-
-        self.region_counter = None
-        if regions:
-            self.region_counter = solutions.RegionCounter(
-                region=regions,
-                line_width=0,
-                show_labels=False,
-                show_conf=False,
-                **common_args
-            )
-
-    @staticmethod
-    def _crossline_id(crossline: dict) -> str:
-        """获取计数线主键，缺失时回退到名称。"""
-        return str(crossline.get("line_id") or crossline.get("name") or "crossline")
-
-    def _append_track_center(self, track_id: int, center: tuple[int, int]) -> tuple[int, int] | None:
-        """维护每个 track 的历史中心点，返回上一帧中心点。"""
-        history = self._track_history[track_id]
-        previous = history[-1] if history else None
-        history.append(center)
-        if len(history) > 30:
-            history.pop(0)
-        return previous
-
-    def _count_crossline(
-        self,
-        crossline: dict,
-        track_id: int,
-        current_centroid: tuple[int, int],
-        prev_position: tuple[int, int] | None,
-    ) -> None:
-        """基于薄矩形检测带统计单条计数线。"""
-        line_id = self._crossline_id(crossline)
-        state = self._crossline_states[line_id]
-
-        if prev_position is None or current_centroid == prev_position or track_id in state["counted_ids"]:
-            return
-
-        region = crossline.get("region", [])
-        if len(region) < 3:
-            return
-
-        region_pts = np.array(region, dtype=np.float32)
-        if cv2.pointPolygonTest(region_pts, current_centroid, False) < 0:
-            return
-
-        region_width = max(p[0] for p in region) - min(p[0] for p in region)
-        region_height = max(p[1] for p in region) - min(p[1] for p in region)
-        positive_motion = (
-            (region_width < region_height and current_centroid[0] > prev_position[0])
-            or (region_width >= region_height and current_centroid[1] > prev_position[1])
-        )
-
-        is_in = positive_motion
-        if crossline.get("direction") == "out":
-            is_in = not is_in
-
-        if is_in:
-            state["in_count"] += 1
-        else:
-            state["out_count"] += 1
-        state["counted_ids"].add(track_id)
-
-    def _collect_crossline_stats(self, tracked_objects: list[tuple[int, tuple[int, int]]]) -> dict[str, dict[str, int | str]]:
-        """计算所有计数线的独立累计统计。"""
-        if not self.crosslines:
-            return {}
+    def _collect_region_stats(
+        self, tracked_objects: list[tuple[int, tuple[int, int]]]
+    ) -> tuple[dict[str, int], dict[str, dict[str, int]]]:
+        """基于轨迹中心点计算区域实时人数和独立进出累计。"""
+        region_counts = {name: 0 for name in self.regions}
 
         for track_id, center in tracked_objects:
-            prev_position = self._append_track_center(track_id, center)
-            for crossline in self.crosslines:
-                self._count_crossline(crossline, track_id, center, prev_position)
+            prev_presence = self._track_region_presence[track_id]
+            current_presence: dict[str, bool] = {}
 
-        return {
-            line_id: {
-                "name": state["name"],
-                "in_count": state["in_count"],
-                "out_count": state["out_count"],
-                "net_flow": state["in_count"] - state["out_count"],
-            }
-            for line_id, state in self._crossline_states.items()
+            for region_name, polygon in self._region_polygons.items():
+                is_inside = cv2.pointPolygonTest(polygon, center, False) >= 0
+                current_presence[region_name] = is_inside
+
+                if is_inside:
+                    region_counts[region_name] += 1
+
+                was_inside = prev_presence.get(region_name)
+                if was_inside is None:
+                    continue
+                if not was_inside and is_inside:
+                    self._region_flow_states[region_name]["in_total"] += 1
+                elif was_inside and not is_inside:
+                    self._region_flow_states[region_name]["out_total"] += 1
+
+            self._track_region_presence[track_id] = current_presence
+
+        return region_counts, {
+            region_name: stats.copy()
+            for region_name, stats in self._region_flow_states.items()
         }
 
     def _draw_regions(self, frame: np.ndarray, region_counts: dict[str, int]) -> np.ndarray:
@@ -349,42 +273,9 @@ class YOLOService:
 
         return result
 
-    def _draw_crosslines(self, frame: np.ndarray) -> np.ndarray:
-        """在帧上绘制计数线（实线 + 箭头 + 名称标签）"""
-        result = frame.copy()
-        for idx, cl in enumerate(self.crosslines):
-            line_pts = cl.get("line", [])
-            if len(line_pts) < 2:
-                continue
-            pt1 = (int(line_pts[0][0]), int(line_pts[0][1]))
-            pt2 = (int(line_pts[1][0]), int(line_pts[1][1]))
-            color = (0, 220, 255)  # 青黄色，与区域虚线区分
-
-            # 粗实线
-            cv2.line(result, pt1, pt2, color, self.crossline_line_thickness + 1)
-            # 两端圆点
-            cv2.circle(result, pt1, 5, color, -1)
-            cv2.circle(result, pt2, 5, color, -1)
-
-            # 线段中点标注名称
-            mid_x = (pt1[0] + pt2[0]) // 2
-            mid_y = (pt1[1] + pt2[1]) // 2
-            name = cl.get("name", f"Line {idx + 1}")
-            result = _put_chinese_text(
-                result, name,
-                position=(mid_x - len(name) * 6, mid_y - 22),
-                font_size=15,
-                color=color,
-                bg_color=(0, 0, 0),
-                bg_alpha=0.55,
-                padding=4,
-            )
-
-        return result
-
     def process(self, frame: np.ndarray) -> DetectionResult:
         """
-        处理单帧，返回追踪结果、区域计数和 cross-line 计数。
+        处理单帧，返回追踪结果、区域计数和区域进出累计。
 
         不包含热力图渲染（由 DMCountService 负责）。
         """
@@ -413,27 +304,14 @@ class YOLOService:
                     if idx < len(track_ids):
                         tracked_objects.append((track_ids[idx], center))
 
-        # 3. 区域计数
-        region_counts = {}
+        # 3. 区域计数和区域进出累计
         output_frame = frame.copy()
+        region_counts, region_flow_stats = self._collect_region_stats(tracked_objects)
 
-        if self.region_counter:
-            region_result = self.region_counter(frame.copy())
-            total_count = region_result.total_tracks
-            region_counts = dict(region_result.region_counts) if region_result.region_counts else {}
+        if self.regions:
             output_frame = self._draw_regions(output_frame, region_counts)
         else:
             output_frame = self._draw_total_count(output_frame, total_count)
-
-        # 4. Cross-line 计数
-        crossline_stats = self._collect_crossline_stats(tracked_objects)
-        crossline_in = sum(int(item["in_count"]) for item in crossline_stats.values())
-        crossline_out = sum(int(item["out_count"]) for item in crossline_stats.values())
-        crossline_ids = sorted({
-            track_id
-            for state in self._crossline_states.values()
-            for track_id in state["counted_ids"]
-        })
 
         # EMA 平滑
         self._ema_count = self._ema_alpha * total_count + (1 - self._ema_alpha) * self._ema_count
@@ -443,10 +321,7 @@ class YOLOService:
             frame=output_frame,
             total_count=total_count,
             region_counts=region_counts,
+            region_flow_stats=region_flow_stats,
             smoothed_count=smoothed,
-            crossline_in_count=crossline_in,
-            crossline_out_count=crossline_out,
-            crossline_stats=crossline_stats,
-            crossline_counted_ids=crossline_ids,
             detection_centers=detection_centers,
         )

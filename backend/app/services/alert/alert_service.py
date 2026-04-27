@@ -14,8 +14,6 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Optional
 
-from app.services.detection import DetectionResult
-
 
 class AlertLevel(Enum):
     """告警级别"""
@@ -41,6 +39,7 @@ class Alert:
     current_value: float
     threshold: float
     timestamp: datetime
+    region_id: str
     region_name: str
 
     def to_dict(self) -> dict:
@@ -52,6 +51,7 @@ class Alert:
             "current_value": self.current_value,
             "threshold": self.threshold,
             "timestamp": self.timestamp.isoformat(),
+            "region_id": self.region_id,
             "region_name": self.region_name,
         }
 
@@ -60,11 +60,22 @@ class Alert:
 class RegionThresholdConfig:
     """区域阈值配置"""
 
+    region_id: str
     region_name: str
     count_warning: Optional[int] = None
     count_critical: Optional[int] = None
     density_warning: Optional[float] = None
     density_critical: Optional[float] = None
+
+
+@dataclass
+class RegionAlertMetrics:
+    """区域告警评估输入"""
+
+    region_id: str
+    region_name: str
+    count: float
+    density: float
 
 
 class AlertService:
@@ -76,29 +87,24 @@ class AlertService:
             cooldown_seconds: 冷却时间（秒），同一区域告警在此时间内不重复触发
         """
         self.cooldown_seconds = cooldown_seconds
-        # 区域阈值配置 {region_name: RegionThresholdConfig}
+        # 区域阈值配置 {region_id: RegionThresholdConfig}
         self._region_configs: dict[str, RegionThresholdConfig] = {}
-        # 记录上次告警时间，用于冷却判断
-        # key: "count:{region_name}" 或 "density:{region_name}"
+        # key: "count:{region_id}" 或 "density:{region_id}"
         self._last_alert_time: dict[str, datetime] = {}
 
     def set_region_thresholds(self, configs: list[RegionThresholdConfig]) -> None:
         """设置区域阈值配置"""
-        self._region_configs = {c.region_name: c for c in configs}
+        self._region_configs = {c.region_id: c for c in configs}
 
     def check(
         self,
-        result: DetectionResult,
-        dm_region_counts: dict[str, float] | None = None,
-        dm_region_densities: dict[str, float] | None = None,
+        region_metrics: dict[str, RegionAlertMetrics],
     ) -> list[Alert]:
         """
-        检查检测结果是否触发告警
+        检查区域指标是否触发告警
 
         Args:
-            result: YOLO 检测结果
-            dm_region_counts: DM-Count 区域人数（优先使用）
-            dm_region_densities: DM-Count 区域密度（优先使用）
+            region_metrics: 按区域 ID 聚合的实时人数和密度
 
         Returns:
             触发的告警列表（可能为空）
@@ -106,32 +112,24 @@ class AlertService:
         alerts: list[Alert] = []
         now = datetime.now()
 
-        # 优先使用 DM-Count 的区域数据，回退到 YOLO
-        region_counts = dm_region_counts if dm_region_counts else result.region_counts
-
         # 检查各区域人数
-        for region_name, count in region_counts.items():
-            density = (dm_region_densities or {}).get(region_name, 0.0)
-
-            # 获取该区域的阈值配置
-            config = self._region_configs.get(region_name)
+        for region_id, metrics in region_metrics.items():
+            config = self._region_configs.get(region_id)
             if not config:
                 continue
 
-            # 检查人数阈值
-            count_alert = self._check_count(region_name, count, config, now)
+            count_alert = self._check_count(metrics, config, now)
             if count_alert:
                 alerts.append(count_alert)
 
-            # 检查密度阈值
-            density_alert = self._check_density(region_name, density, config, now)
+            density_alert = self._check_density(metrics, config, now)
             if density_alert:
                 alerts.append(density_alert)
 
         return alerts
 
     def _check_count(
-        self, region_name: str, count: int, config: RegionThresholdConfig, now: datetime
+        self, metrics: RegionAlertMetrics, config: RegionThresholdConfig, now: datetime
     ) -> Optional[Alert]:
         """检查区域人数告警"""
         warning_th = config.count_warning
@@ -141,12 +139,12 @@ class AlertService:
         if warning_th is None and critical_th is None:
             return None
 
-        level = self._get_level(count, warning_th, critical_th)
+        level = self._get_level(metrics.count, warning_th, critical_th)
         if not level:
             return None
 
         # 冷却检查
-        cooldown_key = f"count:{region_name}"
+        cooldown_key = f"count:{metrics.region_id}"
         if not self._check_cooldown(cooldown_key, now):
             return None
 
@@ -155,14 +153,15 @@ class AlertService:
             alert_id=str(uuid.uuid4()),
             alert_type=AlertType.REGION_COUNT,
             level=level,
-            current_value=count,
+            current_value=metrics.count,
             threshold=threshold,
             timestamp=now,
-            region_name=region_name,
+            region_id=metrics.region_id,
+            region_name=metrics.region_name,
         )
 
     def _check_density(
-        self, region_name: str, density: float, config: RegionThresholdConfig, now: datetime
+        self, metrics: RegionAlertMetrics, config: RegionThresholdConfig, now: datetime
     ) -> Optional[Alert]:
         """检查区域密度告警"""
         warning_th = config.density_warning
@@ -172,12 +171,12 @@ class AlertService:
         if warning_th is None and critical_th is None:
             return None
 
-        level = self._get_level(density, warning_th, critical_th)
+        level = self._get_level(metrics.density, warning_th, critical_th)
         if not level:
             return None
 
         # 冷却检查
-        cooldown_key = f"density:{region_name}"
+        cooldown_key = f"density:{metrics.region_id}"
         if not self._check_cooldown(cooldown_key, now):
             return None
 
@@ -186,10 +185,11 @@ class AlertService:
             alert_id=str(uuid.uuid4()),
             alert_type=AlertType.REGION_DENSITY,
             level=level,
-            current_value=density,
+            current_value=metrics.density,
             threshold=threshold,
             timestamp=now,
-            region_name=region_name,
+            region_id=metrics.region_id,
+            region_name=metrics.region_name,
         )
 
     def _get_level(

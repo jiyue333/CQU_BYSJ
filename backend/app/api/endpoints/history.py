@@ -21,7 +21,7 @@ from app.core.logger import logger
 from app.models import ExportTask
 from app.repositories import StatsRepository, VideoSourceRepository, ExportTaskRepository
 from app.schemas.common import ApiResponse
-from app.schemas.history import CrossLineHistoryStats, HistorySeriesItem, HistoryResponse, RegionHistoryStats
+from app.schemas.history import HistorySeriesItem, HistoryResponse, RegionHistoryStats
 from app.schemas.export import ExportResponse
 
 router = APIRouter(tags=["历史与导出"])
@@ -61,19 +61,13 @@ async def get_history(
         region_stats_dict = s.get_region_stats_dict()
         for region_id, r in region_stats_dict.items():
             regions_data[region_id] = RegionHistoryStats(
+                name=r.name,
                 total_count_avg=r.avg,
                 total_count_max=r.max,
                 total_count_min=r.min,
                 total_density_avg=r.density_avg,
-            )
-
-        crosslines_data = {}
-        crossline_stats_dict = s.get_crossline_stats_dict()
-        for line_id, c in crossline_stats_dict.items():
-            crosslines_data[line_id] = CrossLineHistoryStats(
-                name=c.name,
-                in_total=c.in_total,
-                out_total=c.out_total,
+                in_total=r.in_total,
+                out_total=r.out_total,
             )
 
         series.append(
@@ -83,9 +77,6 @@ async def get_history(
                 total_count_max=s.total_count_max,
                 total_count_min=s.total_count_min,
                 total_density_avg=s.total_density_avg,
-                crossline_in_total=s.crossline_in_total or 0,
-                crossline_out_total=s.crossline_out_total or 0,
-                crossline_stats=crosslines_data,
                 regions=regions_data,
             )
         )

@@ -24,86 +24,75 @@
         </button>
       </nav>
 
+
     </aside>
 
     <div class="workspace">
-      <header class="workspace-header">
-        <div class="workspace-header__copy">
-          <h1>人流分析</h1>
-        </div>
-
-        <div class="workspace-header__actions">
-          <div class="status-chip" :data-tone="systemTone">
-            <IconSymbol name="spark" :size="16" />
-            <span>{{ systemStatusLabel }}</span>
-          </div>
-          <button class="button button--soft" type="button" @click="refreshDashboard">
-            <IconSymbol name="refresh" :size="16" />
-            <span>刷新</span>
-          </button>
-          <button class="button button--soft" type="button" @click="isFullscreen = !isFullscreen">
-            <IconSymbol name="overview" :size="16" />
-            <span>{{ isFullscreen ? "退出全屏" : "全屏" }}</span>
-          </button>
-          <button class="button button--primary" type="button" @click="openConfigCenter()">
-            <IconSymbol name="sliders" :size="16" />
-            <span>配置中心</span>
-          </button>
-        </div>
-      </header>
-
       <main class="workspace-content">
         <section ref="overviewSection" class="section-block">
-          <div class="overview-header">
-            <div class="overview-header__source">
-              <button class="source-trigger" type="button" @click="openSourcePicker">
-                <span class="source-trigger__main">
-                  <span class="source-trigger__icon">
-                    <IconSymbol :name="selectedSource?.source_type === 'stream' ? 'camera' : 'film'" :size="16" />
+          <div class="topbar-card">
+            <div class="overview-header">
+              <div class="overview-header__source">
+                <button class="source-trigger" type="button" @click="openSourcePicker">
+                  <span class="source-trigger__main">
+                    <span class="source-trigger__icon">
+                      <IconSymbol :name="selectedSource?.source_type === 'stream' ? 'camera' : 'film'" :size="16" />
+                    </span>
+                    <span class="source-trigger__copy">
+                      <strong>{{ selectedSource?.name || (sources.length ? "选择数据源" : "暂无数据源") }}</strong>
+                    </span>
                   </span>
-                  <span class="source-trigger__copy">
-                    <strong>{{ selectedSource?.name || (sources.length ? "选择数据源" : "暂无数据源") }}</strong>
-                  </span>
+                  <IconSymbol name="chevron-down" :size="16" />
+                </button>
+                <button class="button button--ghost button--tiny" type="button" @click="openSourceModal('stream')">
+                  <IconSymbol name="plus" :size="16" />
+                  <span>新增</span>
+                </button>
+              </div>
+
+              <div class="topbar-card__status">
+                <span class="status-chip" :data-tone="systemTone">
+                  <IconSymbol name="spark" :size="14" />
+                  <span>{{ systemStatusLabel }}</span>
                 </span>
-                <IconSymbol name="chevron-down" :size="16" />
-              </button>
-              <button class="button button--ghost button--tiny" type="button" @click="openSourceModal('stream')">
-                <IconSymbol name="plus" :size="16" />
-                <span>新增</span>
-              </button>
-            </div>
-            <div class="overview-header__actions">
-              <button
-                class="button button--primary"
-                type="button"
-                :disabled="!selectedSource || busy.analysis"
-                @click="startAnalysis"
-              >
-                <IconSymbol name="play" :size="16" />
-                <span>{{ busy.analysis && analysisStatus !== 'running' ? "启动中..." : "开始分析" }}</span>
-              </button>
-              <button
-                class="button button--soft"
-                type="button"
-                :disabled="!selectedSource || analysisStatus !== 'running' || busy.analysis"
-                @click="stopAnalysis"
-              >
-                <IconSymbol name="pause" :size="16" />
-                <span>{{ busy.analysis && analysisStatus === 'running' ? "停止中..." : "停止分析" }}</span>
-              </button>
-              <button
-                class="button button--ghost"
-                type="button"
-                :disabled="!selectedSource || selectedSource.source_type !== 'file'"
-                @click="openExportModal('clip')"
-              >
-                <IconSymbol name="film" :size="16" />
-                <span>导出片段</span>
-              </button>
-              <button class="button button--ghost" type="button" @click="openConfigCenter()">
-                <IconSymbol name="sliders" :size="16" />
-                <span>配置</span>
-              </button>
+              </div>
+
+              <div class="overview-header__actions">
+                <button
+                  class="button button--primary"
+                  type="button"
+                  :disabled="!selectedSource || busy.analysis"
+                  @click="startAnalysis"
+                >
+                  <IconSymbol name="play" :size="16" />
+                  <span>{{ busy.analysis && analysisStatus !== 'running' ? "启动中..." : "开始分析" }}</span>
+                </button>
+                <button
+                  class="button button--soft"
+                  type="button"
+                  :disabled="!selectedSource || analysisStatus !== 'running' || busy.analysis"
+                  @click="stopAnalysis"
+                >
+                  <IconSymbol name="pause" :size="16" />
+                  <span>{{ busy.analysis && analysisStatus === 'running' ? "停止中..." : "停止分析" }}</span>
+                </button>
+                <button
+                  class="button button--ghost"
+                  type="button"
+                  :disabled="!selectedSource || selectedSource.source_type !== 'file'"
+                  @click="openExportModal('clip')"
+                >
+                  <IconSymbol name="film" :size="16" />
+                  <span>导出片段</span>
+                </button>
+                <button class="button button--ghost" type="button" @click="openConfigCenter()">
+                  <IconSymbol name="sliders" :size="16" />
+                  <span>配置</span>
+                </button>
+                <button class="button button--ghost button--icon" type="button" @click="isFullscreen = !isFullscreen">
+                  <IconSymbol name="overview" :size="16" />
+                </button>
+              </div>
             </div>
           </div>
 
@@ -112,6 +101,7 @@
               <div class="video-stage" :class="{ 'is-empty': !frameSrc }" :style="videoStageStyle">
                 <img v-if="frameSrc" :src="frameSrc" alt="实时监控画面" class="video-stage__frame" />
                 <div class="video-stage__grid"></div>
+                <div class="video-stage__label-mask"></div>
 
                 <div v-if="!frameSrc" class="video-stage__empty">
                   <span class="video-stage__empty-icon">
@@ -150,33 +140,27 @@
                 </article>
               </div>
 
-            </aside>
-          </div>
-
-          <div v-if="regionSummaryRows.length" class="region-bar">
-            <div class="region-bar__head">
-              <strong>区域监测</strong>
-              <button class="button button--ghost button--tiny" type="button" @click="openConfigCenter('regions')">
-                <IconSymbol name="sliders" :size="14" />
-              </button>
-            </div>
-            <div class="region-bar__list">
-              <article
-                v-for="region in regionSummaryRows"
-                :key="region.region_id"
-                class="region-bar__card"
-                :data-tone="region.tone"
-              >
-                <span class="region-swatch" :style="{ backgroundColor: region.color }"></span>
-                <div class="region-bar__card-body">
-                  <strong>{{ region.name }}</strong>
-                  <div class="region-bar__card-stats">
-                    <span>{{ formatCount(region.count) }} 人</span>
-                    <span class="region-bar__density">{{ formatDecimal(region.density, 2) }} 人/m²</span>
+              <div v-if="regionSummaryRows.filter(r => !isFullCoverageRegion(r)).length" class="live-sidebar__regions">
+                <div class="live-sidebar__section-label">区域</div>
+                <article
+                  v-for="region in regionSummaryRows.filter(r => !isFullCoverageRegion(r))"
+                  :key="region.region_id"
+                  class="live-region-card"
+                  :data-tone="region.tone"
+                  @click="scrollToSection('regions'); selectedRegionId = region.region_id"
+                >
+                  <div class="live-region-card__head">
+                    <span class="region-swatch" :style="{ backgroundColor: region.color }"></span>
+                    <span>{{ region.name }}</span>
+                    <span v-if="region.recentAlert" class="live-region-card__alert-dot" :data-tone="alertTone(region.recentAlert.level)"></span>
                   </div>
-                </div>
-              </article>
-            </div>
+                  <div class="live-region-card__count">
+                    <strong>{{ formatCount(region.count) }}</strong>
+                    <small>人</small>
+                  </div>
+                </article>
+              </div>
+            </aside>
           </div>
         </section>
 
@@ -219,7 +203,7 @@
               </select>
 
               <select v-model="historyRegionId" class="field field--select">
-                <option value="all">全局汇总</option>
+                <option value="">全局汇总</option>
                 <option v-for="region in regions" :key="region.region_id" :value="region.region_id">
                   {{ region.name }}
                 </option>
@@ -240,7 +224,7 @@
             <article class="panel panel--chart">
               <div class="panel-head">
                 <div>
-                  <h3>{{ historyMetricMeta.label }}</h3>
+                  <h3>{{ historyMetricMeta.label }} · {{ historyScopeLabel }}</h3>
                 </div>
               </div>
               <div ref="historyChartRef" class="chart-surface"></div>
@@ -293,24 +277,10 @@
           <div class="section-caption">
             <div class="section-caption__title">
               <h2>数据查询</h2>
-              <div class="toggle-group">
-                <button
-                  class="toggle-group__item"
-                  :class="{ 'is-active': queryMode === 'crossline' }"
-                  type="button"
-                  @click="queryMode = 'crossline'"
-                >
-                  计数线
-                </button>
-                <button
-                  class="toggle-group__item"
-                  :class="{ 'is-active': queryMode === 'region' }"
-                  type="button"
-                  @click="queryMode = 'region'"
-                >
-                  区域
-                </button>
-              </div>
+              <span class="soft-chip">
+                <IconSymbol name="target" :size="14" />
+                <span>{{ queryRegionLabel || "选择区域后查询" }}</span>
+              </span>
             </div>
           </div>
 
@@ -328,21 +298,19 @@
               </button>
             </div>
 
-            <select v-if="queryMode === 'crossline'" v-model="queryCrosslineId" class="field field--select">
-              <option value="all">全部计数线</option>
-              <option v-for="line in crosslines" :key="line.line_id" :value="line.line_id">
-                {{ line.name }}
-              </option>
-            </select>
-
-            <select v-else v-model="queryRegionId" class="field field--select">
-              <option value="all">全局汇总</option>
+            <select v-model="queryRegionId" class="field field--select">
+              <option value="" disabled>选择区域</option>
               <option v-for="region in regions" :key="region.region_id" :value="region.region_id">
                 {{ region.name }}
               </option>
             </select>
 
-            <button class="button button--primary" type="button" :disabled="!selectedSourceId || busy.query" @click="runQuery">
+            <button
+              class="button button--primary"
+              type="button"
+              :disabled="!selectedSourceId || !queryRegionId || busy.query"
+              @click="runQuery"
+            >
               <IconSymbol name="spark" :size="16" />
               <span>{{ busy.query ? "查询中..." : "查询" }}</span>
             </button>
@@ -350,53 +318,32 @@
 
           <div v-if="queryResult" class="query-results">
             <div class="query-stat-grid">
-              <template v-if="queryMode === 'crossline'">
-                <article class="query-stat-card" data-tone="primary">
-                  <span>独立进入</span>
-                  <strong>{{ queryResult.totalIn }}</strong>
-                  <small>ByteTrack 去重</small>
-                </article>
-                <article class="query-stat-card" data-tone="warning">
-                  <span>独立离开</span>
-                  <strong>{{ queryResult.totalOut }}</strong>
-                </article>
-                <article class="query-stat-card" data-tone="success">
-                  <span>净流量</span>
-                  <strong>{{ queryResult.netFlow }}</strong>
-                </article>
-                <article class="query-stat-card" data-tone="neutral">
-                  <span>峰值人数</span>
-                  <strong>{{ queryResult.maxCount }}</strong>
-                  <small>{{ queryResult.maxTime }}</small>
-                </article>
-              </template>
-              <template v-else>
-                <article class="query-stat-card" data-tone="primary">
-                  <span>平均人数</span>
-                  <strong>{{ queryResult.totalIn }}</strong>
-                  <small>总人流（含重复）</small>
-                </article>
-                <article class="query-stat-card" data-tone="warning">
-                  <span>峰值人数</span>
-                  <strong>{{ queryResult.maxCount }}</strong>
-                  <small>{{ queryResult.maxTime }}</small>
-                </article>
-                <article class="query-stat-card" data-tone="success">
-                  <span>最低人数</span>
-                  <strong>{{ queryResult.totalOut }}</strong>
-                </article>
-                <article class="query-stat-card" data-tone="neutral">
-                  <span>平均密度</span>
-                  <strong>{{ queryResult.netFlow }}</strong>
-                  <small>人/m²</small>
-                </article>
-              </template>
+              <article class="query-stat-card" data-tone="primary">
+                <span>独立进入</span>
+                <strong>{{ queryResult.independentIn }}</strong>
+                <small>按区域累计</small>
+              </article>
+              <article class="query-stat-card" data-tone="warning">
+                <span>独立离开</span>
+                <strong>{{ queryResult.independentOut }}</strong>
+                <small>按区域累计</small>
+              </article>
+              <article class="query-stat-card" data-tone="success">
+                <span>峰值人数</span>
+                <strong>{{ queryResult.peakCount }}</strong>
+                <small>{{ queryResult.peakTime }}</small>
+              </article>
+              <article class="query-stat-card" data-tone="neutral">
+                <span>平均密度</span>
+                <strong>{{ queryResult.avgDensity }}</strong>
+                <small>人/m²</small>
+              </article>
             </div>
 
             <article class="panel panel--chart">
               <div class="panel-head">
                 <div>
-                  <h3>{{ queryRangeLabel }} · {{ queryMode === 'crossline' ? queryCrosslineLabel : queryRegionLabel }}</h3>
+                  <h3>{{ queryRangeLabel }} · {{ queryRegionLabel }}</h3>
                 </div>
               </div>
               <div ref="queryChartRef" class="chart-surface"></div>
@@ -478,6 +425,98 @@
           <div v-else class="empty-box">
             <IconSymbol name="check" :size="18" />
             <span>系统运行正常，暂无告警</span>
+          </div>
+        </section>
+
+        <section ref="regionsSection" class="section-block">
+          <div class="section-caption">
+            <div class="section-caption__title">
+              <h2>区域</h2>
+            </div>
+            <button class="button button--ghost button--tiny" type="button" @click="openConfigCenter('regions')">
+              <IconSymbol name="sliders" :size="14" />
+              <span>管理</span>
+            </button>
+          </div>
+
+          <div v-if="regionSummaryRows.filter(r => !isFullCoverageRegion(r)).length" class="regions-panel">
+            <article
+              v-for="region in regionSummaryRows.filter(r => !isFullCoverageRegion(r))"
+              :key="region.region_id"
+              class="region-compact-card"
+              :data-tone="region.tone"
+              @click="selectedRegionId = region.region_id"
+            >
+              <div class="region-compact-card__preview" :class="{ 'is-empty': !regionFrameSrc }">
+                <svg
+                  v-if="regionFrameSrc"
+                  class="region-compact-card__preview-svg"
+                  :viewBox="getRegionViewport(region.points)"
+                  preserveAspectRatio="xMidYMid slice"
+                >
+                  <defs>
+                    <clipPath :id="`rcc-clip-${region.region_id}`" clipPathUnits="userSpaceOnUse">
+                      <polygon :points="toSvgPoints(region.points)" />
+                    </clipPath>
+                  </defs>
+                  <image
+                    :href="regionFrameSrc"
+                    x="0" y="0" width="100" height="100"
+                    preserveAspectRatio="none"
+                    :clip-path="`url(#rcc-clip-${region.region_id})`"
+                  />
+                </svg>
+                <div v-else class="region-compact-card__preview-empty">
+                  <IconSymbol name="camera" :size="14" />
+                </div>
+              </div>
+
+              <div class="region-compact-card__body">
+              <div class="region-compact-card__top">
+                <div class="region-compact-card__name">
+                  <span class="region-swatch" :style="{ backgroundColor: region.color }"></span>
+                  <strong>{{ region.name }}</strong>
+                </div>
+                <span
+                  v-if="region.recentAlert"
+                  class="soft-chip soft-chip--xs"
+                  :data-tone="alertTone(region.recentAlert.level)"
+                >
+                  <IconSymbol :name="region.recentAlert.level === 'critical' ? 'warning' : 'alert'" :size="10" />
+                  <span>{{ region.recentAlert.level === 'critical' ? '严重' : '告警' }}</span>
+                </span>
+              </div>
+              <div class="region-compact-card__metrics">
+                <div class="region-compact-card__metric">
+                  <span>人数</span>
+                  <strong>{{ formatCount(region.count) }}</strong>
+                </div>
+                <div class="region-compact-card__metric">
+                  <span>密度</span>
+                  <strong>{{ formatRegionDensity(region) }}</strong>
+                </div>
+                <div class="region-compact-card__metric">
+                  <span>进入</span>
+                  <strong>{{ formatCount(region.inCount) }}</strong>
+                </div>
+                <div class="region-compact-card__metric">
+                  <span>离开</span>
+                  <strong>{{ formatCount(region.outCount) }}</strong>
+                </div>
+              </div>
+              <div v-if="region.recentAlert" class="region-compact-card__alert-bar">
+                <div
+                  class="region-compact-card__alert-fill"
+                  :style="{ width: Math.min(100, (region.recentAlert.current_value / region.recentAlert.threshold) * 100) + '%' }"
+                ></div>
+                <small>{{ Math.round(region.recentAlert.current_value) }} / {{ Math.round(region.recentAlert.threshold) }}</small>
+              </div>
+              </div>
+            </article>
+          </div>
+          <div v-else class="empty-box">
+            <IconSymbol name="target" :size="18" />
+            <span>暂无区域，请在配置中心添加</span>
           </div>
         </section>
       </main>
@@ -612,41 +651,6 @@
           </div>
         </section>
 
-        <section v-else class="drawer-section">
-          <div class="drawer-section__head">
-            <div>
-              <h3>计数线列表</h3>
-            </div>
-            <button class="button button--soft button--tiny" type="button" @click="openCrosslineModal()">
-              <IconSymbol name="plus" :size="14" />
-              <span>新增</span>
-            </button>
-          </div>
-
-          <div v-if="crosslines.length" class="drawer-region-stack">
-            <article v-for="line in crosslines" :key="line.line_id" class="drawer-region-card">
-              <div class="drawer-region-card__main">
-                <span class="region-swatch" :style="{ backgroundColor: line.color }"></span>
-                <div>
-                  <strong>{{ line.name }}</strong>
-                  <small>({{ line.start_x.toFixed(0) }}, {{ line.start_y.toFixed(0) }}) → ({{ line.end_x.toFixed(0) }}, {{ line.end_y.toFixed(0) }})</small>
-                </div>
-              </div>
-              <div class="drawer-region-card__actions">
-                <button class="icon-button" type="button" @click="openCrosslineModal(line)">
-                  <IconSymbol name="edit" :size="16" />
-                </button>
-                <button class="icon-button icon-button--danger" type="button" @click="requestDeleteCrossline(line)">
-                  <IconSymbol name="trash" :size="16" />
-                </button>
-              </div>
-            </article>
-          </div>
-          <div v-else class="empty-box empty-box--drawer">
-            <IconSymbol name="target" :size="16" />
-            <span>暂无计数线</span>
-          </div>
-        </section>
           </div>
         </aside>
       </div>
@@ -663,6 +667,98 @@
         </button>
       </article>
     </transition-group>
+
+    <transition-group name="toast" tag="div" class="alert-popup-stack" aria-live="assertive">
+      <article
+        v-for="popup in alertPopups"
+        :key="popup.alert_id"
+        class="alert-popup-card"
+        :data-tone="alertTone(popup.level)"
+      >
+        <div class="alert-popup-card__header">
+          <span class="alert-popup-card__level">
+            <IconSymbol :name="popup.level === 'critical' ? 'warning' : 'alert'" :size="14" />
+            <span>{{ popup.level === 'critical' ? '严重告警' : '风险告警' }}</span>
+          </span>
+          <button class="icon-button" type="button" @click="removeAlertPopup(popup.alert_id)">
+            <IconSymbol name="close" :size="14" />
+          </button>
+        </div>
+        <strong>{{ popup.region_name || "全局" }}</strong>
+        <p>{{ popup.message || "检测到新的区域风险告警。" }}</p>
+        <small>当前 {{ Math.round(popup.current_value) }} / 阈值 {{ Math.round(popup.threshold) }} · {{ relativeTime(popup.timestamp) }}</small>
+        <div class="alert-popup-card__actions">
+          <button class="button button--primary button--tiny" type="button" @click="openAlertPopup(popup.alert_id)">
+            查看风险
+          </button>
+        </div>
+      </article>
+    </transition-group>
+
+    <!-- Alert Detail Modal -->
+    <transition name="modal-fade">
+      <div v-if="alertDetailModal.open" class="modal-overlay modal-overlay--alert" @click.self="closeAlertDetailModal">
+        <div class="modal-card modal-card--alert" :data-tone="alertDetailModal.alert ? alertTone(alertDetailModal.alert.level) : 'neutral'">
+          <div class="modal-head">
+            <div class="alert-modal-head__copy">
+              <span class="alert-modal-level" :data-tone="alertDetailModal.alert ? alertTone(alertDetailModal.alert.level) : 'neutral'">
+                <IconSymbol :name="alertDetailModal.alert?.level === 'critical' ? 'warning' : 'alert'" :size="16" />
+                <span>{{ alertDetailModal.alert?.level === 'critical' ? '严重告警' : '风险告警' }}</span>
+              </span>
+              <h3>{{ alertDetailModal.alert?.region_name || '全局' }}</h3>
+              <small>{{ alertDetailModal.alert ? relativeTime(alertDetailModal.alert.timestamp) : '' }}</small>
+            </div>
+            <button class="icon-button" type="button" @click="closeAlertDetailModal">
+              <IconSymbol name="close" :size="16" />
+            </button>
+          </div>
+
+          <div v-if="alertDetailModal.alert" class="alert-modal-body">
+            <p class="alert-modal-message">{{ alertDetailModal.alert.message || '检测到区域人流风险，请注意现场情况。' }}</p>
+
+            <div class="alert-modal-progress">
+              <div class="alert-modal-progress__labels">
+                <span>当前值</span>
+                <span>{{ Math.round(alertDetailModal.alert.current_value) }} / {{ Math.round(alertDetailModal.alert.threshold) }} (阈值)</span>
+              </div>
+              <div class="alert-modal-progress__bar-wrap">
+                <div
+                  class="alert-modal-progress__bar"
+                  :style="{ width: Math.min(100, (alertDetailModal.alert.current_value / alertDetailModal.alert.threshold) * 100) + '%' }"
+                ></div>
+              </div>
+            </div>
+
+            <div class="alert-modal-meta">
+              <div class="alert-modal-meta__item">
+                <span>区域</span>
+                <strong>{{ alertDetailModal.alert.region_name || '全局' }}</strong>
+              </div>
+              <div class="alert-modal-meta__item">
+                <span>级别</span>
+                <strong>{{ alertDetailModal.alert.level === 'critical' ? '严重' : '警告' }}</strong>
+              </div>
+              <div class="alert-modal-meta__item">
+                <span>触发时间</span>
+                <strong>{{ new Date(alertDetailModal.alert.timestamp).toLocaleTimeString('zh-CN') }}</strong>
+              </div>
+              <div class="alert-modal-meta__item">
+                <span>超阈倍率</span>
+                <strong>{{ (alertDetailModal.alert.current_value / alertDetailModal.alert.threshold).toFixed(2) }}×</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="modal-actions">
+            <button class="button button--soft" type="button" @click="closeAlertDetailModal">关闭</button>
+            <button class="button button--primary" type="button" @click="goToAlerts">
+              <IconSymbol name="alert" :size="16" />
+              <span>查看所有告警</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
 
     <transition name="modal-fade">
       <div v-if="sourcePickerOpen" class="modal-overlay" @click.self="closeSourcePicker">
@@ -1051,166 +1147,6 @@
     </transition>
 
     <transition name="modal-fade">
-      <div v-if="crosslineModal.open" class="modal-overlay" @click.self="closeCrosslineModal">
-        <div class="modal-card modal-card--crossline">
-          <div class="modal-head">
-            <div>
-              <span class="section-eyebrow">CrossLine</span>
-              <h3>{{ crosslineModal.lineId ? "编辑计数线" : "新增计数线" }}</h3>
-            </div>
-            <button class="icon-button" type="button" @click="closeCrosslineModal">
-              <IconSymbol name="close" :size="16" />
-            </button>
-          </div>
-
-          <div class="crossline-editor">
-            <section class="crossline-editor__stage-panel">
-              <div class="crossline-editor__toolbar">
-                <div class="crossline-editor__hint">
-                  <IconSymbol name="target" :size="14" />
-                  <span>{{ crosslineEditorHint }}</span>
-                </div>
-                <div class="crossline-editor__toolbar-actions">
-                  <button
-                    class="button button--ghost button--tiny"
-                    type="button"
-                    :disabled="!crosslineEditor.startPoint && !crosslineEditor.endPoint"
-                    @click="clearCrosslineEditor"
-                  >
-                    清空
-                  </button>
-                </div>
-              </div>
-
-              <div
-                ref="crosslineStageRef"
-                class="region-editor__stage"
-                :class="{ 'is-empty': !frameSrc }"
-                @click="handleCrosslineStageClick"
-                @pointermove="handleCrosslineStagePointerMove"
-                @pointerleave="crosslineEditor.hoverPoint = null"
-              >
-                <img v-if="frameSrc" :src="frameSrc" alt="计数线编辑预览画面" class="region-editor__frame" />
-                <div class="video-stage__grid region-editor__grid"></div>
-
-                <div v-if="!frameSrc" class="region-editor__fallback">
-                  <span class="video-stage__empty-icon">
-                    <IconSymbol name="camera" :size="28" />
-                  </span>
-                  <div>
-                    <strong>等待画面</strong>
-                    <small>没有实时帧时，仍可按比例预设计数线。</small>
-                  </div>
-                </div>
-
-                <svg class="region-editor__overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                  <g v-for="line in crosslineEditorReferenceLines" :key="line.line_id">
-                    <line
-                      :x1="line.start_x" :y1="line.start_y"
-                      :x2="line.end_x" :y2="line.end_y"
-                      class="crossline-editor__reference"
-                      :style="{ stroke: line.color }"
-                    />
-                  </g>
-
-                  <line
-                    v-if="crosslineEditor.startPoint && crosslineEditor.endPoint"
-                    :x1="crosslineEditor.startPoint[0]" :y1="crosslineEditor.startPoint[1]"
-                    :x2="crosslineEditor.endPoint[0]" :y2="crosslineEditor.endPoint[1]"
-                    class="crossline-editor__draft-line"
-                    :style="{ stroke: crosslineModal.color }"
-                  />
-                  <line
-                    v-else-if="crosslineEditor.startPoint && crosslineEditor.hoverPoint"
-                    :x1="crosslineEditor.startPoint[0]" :y1="crosslineEditor.startPoint[1]"
-                    :x2="crosslineEditor.hoverPoint[0]" :y2="crosslineEditor.hoverPoint[1]"
-                    class="crossline-editor__preview-line"
-                    :style="{ stroke: crosslineModal.color }"
-                  />
-                </svg>
-
-                <button
-                  v-if="crosslineEditor.startPoint"
-                  class="region-editor__handle"
-                  :class="{ 'is-active': crosslineDrag.index === 0 }"
-                  type="button"
-                  :style="crosslineHandleStyle(crosslineEditor.startPoint)"
-                  @pointerdown.stop="startCrosslineHandleDrag(0, $event)"
-                >
-                  <span class="sr-only">起点</span>
-                </button>
-                <button
-                  v-if="crosslineEditor.endPoint"
-                  class="region-editor__handle"
-                  :class="{ 'is-active': crosslineDrag.index === 1 }"
-                  type="button"
-                  :style="crosslineHandleStyle(crosslineEditor.endPoint)"
-                  @pointerdown.stop="startCrosslineHandleDrag(1, $event)"
-                >
-                  <span class="sr-only">终点</span>
-                </button>
-              </div>
-
-              <div class="region-editor__stage-meta">
-                <span>{{ crosslineEditorStatus }}</span>
-              </div>
-            </section>
-
-            <aside class="crossline-editor__sidebar">
-              <div class="form-grid">
-                <label class="field-group">
-                  <span>线段名称</span>
-                  <input v-model.trim="crosslineModal.name" class="field" type="text" placeholder="例如：闸机口A" />
-                </label>
-                <label class="field-group">
-                  <span>颜色</span>
-                  <input v-model="crosslineModal.color" class="field field--color" type="color" />
-                </label>
-              </div>
-
-              <div class="crossline-editor__summary">
-                <span class="soft-chip" :data-tone="crosslineEditor.startPoint ? 'success' : 'warning'">
-                  <IconSymbol :name="crosslineEditor.startPoint ? 'check' : 'warning'" :size="14" />
-                  <span>{{ crosslineEditor.startPoint ? '起点已设' : '待设起点' }}</span>
-                </span>
-                <span class="soft-chip" :data-tone="crosslineEditor.endPoint ? 'success' : 'warning'">
-                  <IconSymbol :name="crosslineEditor.endPoint ? 'check' : 'warning'" :size="14" />
-                  <span>{{ crosslineEditor.endPoint ? '终点已设' : '待设终点' }}</span>
-                </span>
-              </div>
-
-              <div v-if="crosslineEditor.startPoint && crosslineEditor.endPoint" class="crossline-editor__coords">
-                <div class="form-grid form-grid--double">
-                  <div class="field-group">
-                    <span>起点</span>
-                    <span class="crossline-editor__coord-value">({{ crosslineEditor.startPoint[0].toFixed(1) }}, {{ crosslineEditor.startPoint[1].toFixed(1) }})</span>
-                  </div>
-                  <div class="field-group">
-                    <span>终点</span>
-                    <span class="crossline-editor__coord-value">({{ crosslineEditor.endPoint[0].toFixed(1) }}, {{ crosslineEditor.endPoint[1].toFixed(1) }})</span>
-                  </div>
-                </div>
-              </div>
-            </aside>
-          </div>
-
-          <div class="modal-actions">
-            <button class="button button--soft" type="button" @click="closeCrosslineModal">取消</button>
-            <button
-              class="button button--primary"
-              type="button"
-              :disabled="busy.crosslineSubmit || !crosslineEditor.startPoint || !crosslineEditor.endPoint || !crosslineModal.name"
-              @click="submitCrosslineModal"
-            >
-              <IconSymbol name="save" :size="16" />
-              <span>{{ busy.crosslineSubmit ? "保存中..." : "保存计数线" }}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </transition>
-
-    <transition name="modal-fade">
       <div v-if="exportModal.open" class="modal-overlay" @click.self="closeExportModal">
         <div class="modal-card">
           <div class="modal-head">
@@ -1298,8 +1234,6 @@ import type {
   AlertRecentResponse,
   AlertThresholdConfig,
   AnalysisStatusValue,
-  CrossLine,
-  CrossLineListResponse,
   HistoryMetricKey,
   HistoryResponse,
   HistorySeriesItem,
@@ -1312,14 +1246,14 @@ import type {
   VideoSource,
 } from "@/types";
 
-type SectionKey = "overview" | "history" | "query" | "alerts";
+type SectionKey = "overview" | "history" | "query" | "alerts" | "regions";
 type QueryRange = "today" | "yesterday" | "7d";
 type ToastTone = "info" | "success" | "warning" | "error";
 type SourceModalMode = "stream" | "upload";
 type ExportKind = "history" | "alerts" | "clip";
 type HistoryWindow = "30m" | "6h" | "24h";
 type HistoryInterval = "1m" | "5m" | "1h";
-type ConfigSection = "thresholds" | "layouts" | "regions" | "crosslines";
+type ConfigSection = "thresholds" | "layouts" | "regions";
 type RegionEditorTool = "polygon" | "rectangle";
 type RegionPoint = [number, number];
 type RegionDragMode = "none" | "vertex" | "shape" | "rectangle";
@@ -1339,6 +1273,7 @@ const navigationItems: Array<{ key: SectionKey; label: string; icon: string }> =
   { key: "history", label: "趋势", icon: "history" },
   { key: "query", label: "查询", icon: "chart" },
   { key: "alerts", label: "风险", icon: "alert" },
+  { key: "regions", label: "区域", icon: "target" },
 ];
 
 const historyMetrics = [
@@ -1363,7 +1298,6 @@ const configTabs: Array<{ key: ConfigSection; label: string }> = [
   { key: "thresholds", label: "阈值" },
   { key: "layouts", label: "模板" },
   { key: "regions", label: "区域" },
-  { key: "crosslines", label: "计数线" },
 ];
 
 const defaultRegionThresholds = {
@@ -1540,6 +1474,7 @@ const overviewSection = ref<HTMLElement | null>(null);
 const historySection = ref<HTMLElement | null>(null);
 const querySection = ref<HTMLElement | null>(null);
 const alertsSection = ref<HTMLElement | null>(null);
+const regionsSection = ref<HTMLElement | null>(null);
 const historyChartRef = ref<HTMLDivElement | null>(null);
 const fileInputRef = ref<HTMLInputElement | null>(null);
 
@@ -1562,44 +1497,22 @@ const selectedSourceId = ref("");
 const analysisStatus = ref<AnalysisStatusValue>("ready");
 const analysisStartedAt = ref<string | null>(null);
 const recentAlerts = ref<AlertRecentItem[]>([]);
+const alertPopups = ref<AlertRecentItem[]>([]);
+const alertDetailModal = reactive<{ open: boolean; alert: AlertRecentItem | null }>({ open: false, alert: null });
 const regions = ref<Region[]>([]);
-const crosslines = ref<CrossLine[]>([]);
-
-const crosslineModal = reactive({
-  open: false,
-  lineId: "",
-  name: "",
-  color: "#00FF00",
-});
-
-const crosslineStageRef = ref<HTMLElement | null>(null);
-
-const crosslineEditor = reactive({
-  startPoint: null as RegionPoint | null,
-  endPoint: null as RegionPoint | null,
-  hoverPoint: null as RegionPoint | null,
-});
-
-const crosslineDrag = reactive({
-  index: -1,
-  active: false,
-});
 const isFullscreen = ref(false);
 
-// --- 数据查询 ---
-type QueryMode = "crossline" | "region";
-const queryMode = ref<QueryMode>("crossline");
 const queryRange = ref<QueryRange>("today");
-const queryCrosslineId = ref("all");
-const queryRegionId = ref("all");
+const queryRegionId = ref("");
+const selectedRegionId = ref("");
 const queryChartRef = ref<HTMLDivElement | null>(null);
 const queryChart = ref<echarts.ECharts | null>(null);
 const queryResult = ref<{
-  totalIn: string;
-  totalOut: string;
-  netFlow: string;
-  maxCount: string;
-  maxTime: string;
+  independentIn: string;
+  independentOut: string;
+  peakCount: string;
+  peakTime: string;
+  avgDensity: string;
 } | null>(null);
 
 const queryRangeOptions: Array<{ value: QueryRange; label: string }> = [
@@ -1612,13 +1525,8 @@ const queryRangeLabel = computed(() =>
   queryRangeOptions.find((item) => item.value === queryRange.value)?.label || "今日"
 );
 
-const queryCrosslineLabel = computed(() => {
-  if (queryCrosslineId.value === "all") return "全部计数线";
-  return crosslines.value.find((l) => l.line_id === queryCrosslineId.value)?.name || "未知计数线";
-});
-
 const queryRegionLabel = computed(() => {
-  if (queryRegionId.value === "all") return "全局汇总";
+  if (!queryRegionId.value) return "";
   return regions.value.find((r) => r.region_id === queryRegionId.value)?.name || "未知区域";
 });
 
@@ -1645,11 +1553,15 @@ async function runQuery() {
     pushToast("请先选择数据源。", "warning");
     return;
   }
+  if (!queryRegionId.value) {
+    pushToast("请先选择区域。", "warning");
+    return;
+  }
 
   busy.query = true;
   try {
     const { from, to, interval } = getQueryTimeRange();
-    const url = `/history?source_id=${encodeURIComponent(selectedSourceId.value)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&interval=${interval}`;
+    const url = `/history?source_id=${encodeURIComponent(selectedSourceId.value)}&region_id=${encodeURIComponent(queryRegionId.value)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&interval=${interval}`;
     const data = await apiGet<HistoryResponse>(url);
     const series = data.series || [];
 
@@ -1659,93 +1571,21 @@ async function runQuery() {
       return;
     }
 
-    let chartSeries: Array<{ name: string; type: string; data: number[]; smooth: boolean; symbol: string; lineStyle: { width: number; color: string }; areaStyle?: { color: string } }> = [];
-    let legendData: string[] = [];
+    const counts = series.map((item) => resolveHistoryValue(item, "total_count_avg", queryRegionId.value) ?? 0);
+    const densities = series.map((item) => resolveHistoryValue(item, "total_density_avg", queryRegionId.value) ?? 0);
+    const inTotals = series.map((item) => getHistoryRegionFlow(item, queryRegionId.value).inTotal);
+    const outTotals = series.map((item) => getHistoryRegionFlow(item, queryRegionId.value).outTotal);
+    const maxCount = Math.max(...counts);
+    const maxIdx = counts.indexOf(maxCount);
+    const avgDensity = densities.reduce((sum, value) => sum + value, 0) / densities.length;
 
-    if (queryMode.value === "crossline") {
-      // 计数线模式：独立人流（ByteTrack 去重）
-      const lastPoint = series[series.length - 1];
-      const firstPoint = series[0];
-      const selectedLineId = queryCrosslineId.value === "all" ? "all" : queryCrosslineId.value;
-      const lastTotals = getHistoryCrosslineTotals(lastPoint, selectedLineId);
-      const firstTotals = getHistoryCrosslineTotals(firstPoint, selectedLineId);
-      const totalIn = lastTotals.inTotal - firstTotals.inTotal;
-      const totalOut = lastTotals.outTotal - firstTotals.outTotal;
-      const netFlow = totalIn - totalOut;
-      const counts = series.map((item) => item.total_count_avg);
-      const maxIdx = counts.indexOf(Math.max(...counts));
-
-      queryResult.value = {
-        totalIn: String(Math.max(0, totalIn)),
-        totalOut: String(Math.max(0, totalOut)),
-        netFlow: `${netFlow >= 0 ? "+" : ""}${netFlow}`,
-        maxCount: String(Math.round(Math.max(...counts))),
-        maxTime: formatTime(series[maxIdx]?.time || ""),
-      };
-
-      const inData = series.map((item) => getHistoryCrosslineTotals(item, selectedLineId).inTotal);
-      const outData = series.map((item) => getHistoryCrosslineTotals(item, selectedLineId).outTotal);
-      legendData = ["累计进入", "累计离开"];
-      chartSeries = [
-        {
-          name: "累计进入",
-          type: "line",
-          data: inData,
-          smooth: true,
-          symbol: "none",
-          lineStyle: { width: 2, color: "#2563EB" },
-          areaStyle: { color: "rgba(37,99,235,0.08)" },
-        },
-        {
-          name: "累计离开",
-          type: "line",
-          data: outData,
-          smooth: true,
-          symbol: "none",
-          lineStyle: { width: 2, color: "#F97316" },
-          areaStyle: { color: "rgba(249,115,22,0.08)" },
-        },
-      ];
-    } else {
-      // 区域模式：总人流（含重复）
-      const rid = queryRegionId.value;
-      let counts: number[];
-      let densities: number[];
-
-      if (rid === "all") {
-        counts = series.map((item) => item.total_count_avg);
-        densities = series.map((item) => item.total_density_avg);
-      } else {
-        counts = series.map((item) => item.regions?.[rid]?.total_count_avg ?? 0);
-        densities = series.map((item) => item.regions?.[rid]?.total_density_avg ?? 0);
-      }
-
-      const maxIdx = counts.indexOf(Math.max(...counts));
-      const avgCount = counts.reduce((a, b) => a + b, 0) / counts.length;
-      const minCount = Math.min(...counts);
-      const avgDensity = densities.reduce((a, b) => a + b, 0) / densities.length;
-
-      queryResult.value = {
-        totalIn: formatDecimal(avgCount, 1),
-        maxCount: String(Math.round(Math.max(...counts))),
-        maxTime: formatTime(series[maxIdx]?.time || ""),
-        totalOut: String(Math.round(minCount)),
-        netFlow: formatDecimal(avgDensity, 2),
-      };
-
-      legendData = ["人数趋势"];
-      chartSeries = [
-        {
-          name: "人数趋势",
-          type: "line",
-          data: counts.map((v) => Number(v.toFixed(1))),
-          smooth: true,
-          symbol: "none",
-          lineStyle: { width: 2, color: "#2563EB" },
-          areaStyle: { color: "rgba(37,99,235,0.08)" },
-        },
-      ];
-    }
+    queryResult.value = {
+      independentIn: String(Math.max(...inTotals)),
+      independentOut: String(Math.max(...outTotals)),
+      peakCount: String(Math.round(maxCount)),
+      peakTime: formatTime(series[maxIdx]?.time || ""),
+      avgDensity: formatDecimal(avgDensity, 2),
+    };
 
     // 渲染查询图表
     await nextTick();
@@ -1755,7 +1595,7 @@ async function runQuery() {
     }
     queryChart.value.setOption({
       tooltip: { trigger: "axis" },
-      legend: { data: legendData, top: 4, right: 16, textStyle: { fontSize: 11, color: "#94a3b8" } },
+      legend: { data: ["独立进入", "独立离开"], top: 4, right: 16, textStyle: { fontSize: 11, color: "#94a3b8" } },
       grid: { left: 48, right: 16, top: 32, bottom: 32 },
       xAxis: {
         type: "category",
@@ -1767,7 +1607,26 @@ async function runQuery() {
         axisLabel: { fontSize: 11, color: "#94a3b8" },
         splitLine: { lineStyle: { color: "rgba(148,163,184,0.12)" } },
       },
-      series: chartSeries,
+      series: [
+        {
+          name: "独立进入",
+          type: "line",
+          data: inTotals,
+          smooth: true,
+          symbol: "none",
+          lineStyle: { width: 2, color: "#2563EB" },
+          areaStyle: { color: "rgba(37,99,235,0.08)" },
+        },
+        {
+          name: "独立离开",
+          type: "line",
+          data: outTotals,
+          smooth: true,
+          symbol: "none",
+          lineStyle: { width: 2, color: "#F97316" },
+          areaStyle: { color: "rgba(249,115,22,0.08)" },
+        },
+      ],
     }, true);
   } catch (error) {
     pushToast(extractErrorMessage(error), "error");
@@ -1780,7 +1639,7 @@ const historyData = ref<HistoryResponse>({ series: [] });
 const historyInterval = ref<HistoryInterval>("1m");
 const historyWindow = ref<HistoryWindow>("6h");
 const historyMetric = ref<HistoryMetricKey>("total_count_avg");
-const historyRegionId = ref("all");
+const historyRegionId = ref("");
 
 const thresholdForm = reactive({
   totalWarning: 80,
@@ -1837,7 +1696,6 @@ const busy = reactive({
   sourceSubmit: false,
   regionSubmit: false,
   exportSubmit: false,
-  crosslineSubmit: false,
   query: false,
   analysis: false,
   template: false,
@@ -1872,6 +1730,7 @@ let reconnectTimer: number | null = null;
 let heartbeatTimer: number | null = null;
 let reconnectAttempts = 0;
 let initialPromptShown = false;
+const alertPopupTimers = new Map<string, number>();
 
 function openConfigCenter(section: ConfigSection = "thresholds") {
   configSection.value = section;
@@ -1880,6 +1739,15 @@ function openConfigCenter(section: ConfigSection = "thresholds") {
 
 const selectedSource = computed(
   () => sources.value.find((item) => item.source_id === selectedSourceId.value) || null
+);
+
+const regionNavItems = computed(() =>
+  regionSummaryRows.value.map((region) => ({
+    key: region.region_id,
+    regionId: region.region_id,
+    label: region.name,
+    color: region.color,
+  }))
 );
 
 const lastHistoryPoint = computed(() => {
@@ -1891,7 +1759,33 @@ const historyMetricMeta = computed(
   () => historyMetrics.find((item) => item.key === historyMetric.value) || historyMetrics[0]
 );
 
+const historyScopeLabel = computed(() => {
+  if (!historyRegionId.value) {
+    return "全局汇总";
+  }
+  return regions.value.find((region) => region.region_id === historyRegionId.value)?.name || "未知区域";
+});
+
 const frameSrc = computed(() => (liveFrame.value ? `data:image/jpeg;base64,${liveFrame.value.frame}` : ""));
+const regionFrameSrc = computed(() =>
+  liveFrame.value?.source_frame
+    ? `data:image/jpeg;base64,${liveFrame.value.source_frame}`
+    : frameSrc.value
+);
+
+const latestRegionAlertById = computed(() => {
+  const alertMap = new Map<string, AlertRecentItem>();
+  const items = [...recentAlerts.value].sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
+
+  for (const item of items) {
+    if (!item.region_id || alertMap.has(item.region_id)) continue;
+    alertMap.set(item.region_id, item);
+  }
+
+  return alertMap;
+});
 
 const displayTotals = computed(() => {
   return {
@@ -1901,64 +1795,70 @@ const displayTotals = computed(() => {
   };
 });
 
-function getHistoryCrosslineTotals(
-  point: HistorySeriesItem | null,
-  lineId: string | "all"
-) {
-  if (!point) {
-    return { inTotal: 0, outTotal: 0, netFlow: 0 };
-  }
-
-  if (lineId === "all") {
-    const stats = Object.values(point.crossline_stats || {});
-    if (!stats.length) {
-      const inTotal = point.crossline_in_total ?? 0;
-      const outTotal = point.crossline_out_total ?? 0;
-      return { inTotal, outTotal, netFlow: inTotal - outTotal };
-    }
-
-    const inTotal = stats.reduce((sum, item) => sum + (item.in_total ?? 0), 0);
-    const outTotal = stats.reduce((sum, item) => sum + (item.out_total ?? 0), 0);
-    return { inTotal, outTotal, netFlow: inTotal - outTotal };
-  }
-
-  const stats = point.crossline_stats?.[lineId];
-  const inTotal = stats?.in_total ?? 0;
-  const outTotal = stats?.out_total ?? 0;
-  return { inTotal, outTotal, netFlow: inTotal - outTotal };
+function getRegionHistoryStats(point: HistorySeriesItem | null, regionId: string) {
+  if (!point || !regionId) return null;
+  return point.regions?.[regionId] ?? null;
 }
 
-function getLiveCrosslineTotals(lineId: string | "all") {
-  const liveStats = liveFrame.value?.crossline_stats || {};
+function getRegionRealtimeStats(regionId: string) {
+  if (!regionId) return null;
+  return liveFrame.value?.regions?.[regionId] ?? null;
+}
 
-  if (lineId === "all") {
-    const stats = Object.values(liveStats);
-    if (!stats.length) {
-      const inCount = liveFrame.value?.crossline_in_count
-        ?? getHistoryCrosslineTotals(lastHistoryPoint.value, "all").inTotal;
-      const outCount = liveFrame.value?.crossline_out_count
-        ?? getHistoryCrosslineTotals(lastHistoryPoint.value, "all").outTotal;
-      return { inCount, outCount, netFlow: inCount - outCount };
-    }
+function getHistoryRegionFlow(point: HistorySeriesItem | null, regionId: string) {
+  const stats = getRegionHistoryStats(point, regionId);
+  const inTotal = stats?.in_total ?? 0;
+  const outTotal = stats?.out_total ?? 0;
+  return { inTotal, outTotal };
+}
 
-    const inCount = stats.reduce((sum, item) => sum + (item.in_count ?? 0), 0);
-    const outCount = stats.reduce((sum, item) => sum + (item.out_count ?? 0), 0);
-    return { inCount, outCount, netFlow: inCount - outCount };
-  }
-
-  const stats = liveStats[lineId];
-  if (stats) {
-    const inCount = stats.in_count ?? 0;
-    const outCount = stats.out_count ?? 0;
-    return { inCount, outCount, netFlow: inCount - outCount };
-  }
-
-  const historyTotals = getHistoryCrosslineTotals(lastHistoryPoint.value, lineId);
+function getLiveRegionFlow(regionId: string) {
+  const stats = getRegionRealtimeStats(regionId);
+  const historyFlow = getHistoryRegionFlow(lastHistoryPoint.value, regionId);
   return {
-    inCount: historyTotals.inTotal,
-    outCount: historyTotals.outTotal,
-    netFlow: historyTotals.netFlow,
+    inCount: stats?.in_total ?? historyFlow.inTotal,
+    outCount: stats?.out_total ?? historyFlow.outTotal,
   };
+}
+
+function getPolygonArea(points: number[][]) {
+  if (points.length < 3) return 0;
+
+  let area = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const [x1, y1] = points[index];
+    const [x2, y2] = points[(index + 1) % points.length];
+    area += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(area / 2);
+}
+
+function isFullCoverageRegion(region: Region) {
+  return getPolygonArea(region.points) >= 9800;
+}
+
+function hasRegionDensityContext(region: Region) {
+  if (region.area_physical != null && region.area_physical > 0) {
+    return true;
+  }
+  if (selectedSource.value?.scene_area_m2 != null && selectedSource.value.scene_area_m2 > 0) {
+    return true;
+  }
+  return false;
+}
+
+function formatRegionDensity(region: Region & { density: number | null }) {
+  if (!hasRegionDensityContext(region)) {
+    return "--";
+  }
+  return formatDecimal(region.density, 2);
+}
+
+function isRecentAlert(alert: AlertRecentItem | null | undefined, maxAgeMs = 10 * 60 * 1000) {
+  if (!alert?.timestamp) return false;
+  const timestamp = new Date(alert.timestamp).getTime();
+  if (!Number.isFinite(timestamp)) return false;
+  return Date.now() - timestamp <= maxAgeMs;
 }
 
 const densityTone = computed(() => getDensityTone(displayTotals.value.totalDensity));
@@ -2014,51 +1914,122 @@ const summaryCards = computed(() => {
       tone: densityTone.value,
       icon: "target",
     },
+    {
+      label: "区域数量",
+      value: `${regions.value.length || 0} 个`,
+      hint: regions.value.length ? "已进入区域化监测模式" : "请先配置区域",
+      tone: regions.value.length ? "success" : "warning",
+      icon: "area",
+    },
   ];
-
-  // 按计数线显示进出
-  if (crosslines.value.length) {
-    for (const line of crosslines.value) {
-      const lineTotals = getLiveCrosslineTotals(line.line_id);
-      cards.push({
-        label: line.name,
-        value: `A ${lineTotals.inCount} / B ${lineTotals.outCount}`,
-        hint: `净流量: ${lineTotals.netFlow >= 0 ? "+" : ""}${lineTotals.netFlow}`,
-        tone: lineTotals.netFlow > 0 ? "success" : "neutral",
-        icon: "chart",
-      });
-    }
-  } else {
-    const totalCrossline = getLiveCrosslineTotals("all");
-    cards.push({
-      label: "A / B",
-      value: `${totalCrossline.inCount} / ${totalCrossline.outCount}`,
-      hint: "未配置计数线",
-      tone: "neutral",
-      icon: "chart",
-    });
-  }
 
   return cards;
 });
 
+const regionMonitorSummary = computed(() => {
+  if (!regionSummaryRows.value.length) {
+    return "等待区域配置";
+  }
+  if (selectedRegionCard.value) {
+    return `${regionSummaryRows.value.length} 个区域 · 当前 ${selectedRegionCard.value.name}`;
+  }
+  if (analysisStatus.value === "running") {
+    return `${regionSummaryRows.value.length} 个区域 · 实时联动中`;
+  }
+  return `${regionSummaryRows.value.length} 个区域 · 停止时显示最近值`;
+});
+
+const regionFlowGuidance = computed(() => {
+  if (regions.value.length !== 1) {
+    return "";
+  }
+
+  const region = regions.value[0];
+  if (!region || !isFullCoverageRegion(region)) {
+    return "";
+  }
+
+  return "当前只配置了全画面区域，独立进入/离开通常会保持 0。应用左右或前中后模板后，更容易观察方向流量。";
+});
+
 const regionSummaryRows = computed(() =>
   regions.value.map((region) => {
-    const liveRegion = liveFrame.value?.regions?.[region.region_id];
-    const historyRegion = lastHistoryPoint.value?.regions?.[region.region_id];
-    const count = liveRegion?.total_count_avg ?? historyRegion?.total_count_avg ?? null;
-    const density = liveRegion?.total_density_avg ?? historyRegion?.total_density_avg ?? null;
-    const tone = getRegionTone(region, count, density);
+    const liveRegion = getRegionRealtimeStats(region.region_id);
+    const historyRegion = getRegionHistoryStats(lastHistoryPoint.value, region.region_id);
+    const flow = getLiveRegionFlow(region.region_id);
+    const count = liveRegion?.count ?? historyRegion?.total_count_avg ?? null;
+    const density = liveRegion?.density ?? historyRegion?.total_density_avg ?? null;
+    const recentAlert = latestRegionAlertById.value.get(region.region_id) || null;
+    const hasActiveAlert = isRecentAlert(recentAlert);
+    const tone = hasActiveAlert ? alertTone(recentAlert!.level) : getRegionTone(region, count, density);
+    const densityContextMissing = !hasRegionDensityContext(region);
+    const isFullCoverage = isFullCoverageRegion(region);
     return {
       ...region,
+      inCount: flow.inCount,
+      outCount: flow.outCount,
       count,
       density,
       tone,
-      description: `${formatCount(count)} 人 · 密度 ${formatDecimal(density, 2)} 人/m²`,
+      recentAlert,
+      caption: hasActiveAlert
+        ? `${recentAlert?.level === "critical" ? "严重" : "告警"} · ${relativeTime(recentAlert?.timestamp)}`
+        : isFullCoverage
+          ? "全画面区域"
+          : "区域流量",
+      detail: hasActiveAlert
+        ? `${recentAlert?.message || "区域风险已触发"}`
+        : densityContextMissing
+          ? "未设置物理面积，密度暂不具备解释性。"
+          : buildThresholdText(region),
       thresholdText: buildThresholdText(region),
     };
   })
 );
+
+const selectedRegionCard = computed(() => {
+  if (!regionSummaryRows.value.length) {
+    return null;
+  }
+
+  return (
+    regionSummaryRows.value.find((region) => region.region_id === selectedRegionId.value) ||
+    regionSummaryRows.value[0]
+  );
+});
+
+const selectedRegionClipPathId = computed(() =>
+  selectedRegionCard.value ? `region-clip-${selectedRegionCard.value.region_id}` : "region-clip-none"
+);
+
+const selectedRegionViewport = computed(() => {
+  const region = selectedRegionCard.value;
+  if (!region) {
+    return "0 0 100 100";
+  }
+
+  const xs = region.points.map(([x]) => x);
+  const ys = region.points.map(([, y]) => y);
+  const minX = Math.max(0, Math.min(...xs));
+  const minY = Math.max(0, Math.min(...ys));
+  const maxX = Math.min(100, Math.max(...xs));
+  const maxY = Math.min(100, Math.max(...ys));
+  const width = Math.max(8, maxX - minX);
+  const height = Math.max(8, maxY - minY);
+  return `${minX} ${minY} ${width} ${height}`;
+});
+
+function getRegionViewport(points: number[][]) {
+  const xs = points.map(([x]) => x);
+  const ys = points.map(([, y]) => y);
+  const minX = Math.max(0, Math.min(...xs));
+  const minY = Math.max(0, Math.min(...ys));
+  const maxX = Math.min(100, Math.max(...xs));
+  const maxY = Math.min(100, Math.max(...ys));
+  const w = Math.max(8, maxX - minX);
+  const h = Math.max(8, maxY - minY);
+  return `${minX} ${minY} ${w} ${h}`;
+}
 
 const regionEditorReferenceRegions = computed(() =>
   regions.value.filter((region) => region.region_id !== regionModal.regionId)
@@ -2258,10 +2229,57 @@ function alertTone(level: string) {
   return level === "critical" ? "danger" : "warning";
 }
 
+function clearAlertPopups() {
+  for (const timer of alertPopupTimers.values()) {
+    window.clearTimeout(timer);
+  }
+  alertPopupTimers.clear();
+  alertPopups.value = [];
+}
+
+function removeAlertPopup(alertId: string) {
+  const timer = alertPopupTimers.get(alertId);
+  if (timer) {
+    window.clearTimeout(timer);
+    alertPopupTimers.delete(alertId);
+  }
+  alertPopups.value = alertPopups.value.filter((item) => item.alert_id !== alertId);
+}
+
+function showAlertPopup(alert: AlertRecentItem) {
+  removeAlertPopup(alert.alert_id);
+  alertPopups.value = [alert, ...alertPopups.value].slice(0, 3);
+  const timer = window.setTimeout(() => removeAlertPopup(alert.alert_id), 8000);
+  alertPopupTimers.set(alert.alert_id, timer);
+}
+
+function openAlertPopup(alertId: string) {
+  const alert = alertPopups.value.find((a) => a.alert_id === alertId) || recentAlerts.value.find((a) => a.alert_id === alertId) || null;
+  removeAlertPopup(alertId);
+  if (alert) {
+    alertDetailModal.alert = alert;
+    alertDetailModal.open = true;
+  } else {
+    scrollToSection("alerts");
+  }
+}
+
+function closeAlertDetailModal() {
+  alertDetailModal.open = false;
+  alertDetailModal.alert = null;
+}
+
+function goToAlerts() {
+  closeAlertDetailModal();
+  scrollToSection("alerts");
+}
+
 function resolveHistoryValue(item: HistorySeriesItem, metric: HistoryMetricKey, regionId: string) {
-  if (regionId !== "all") {
-    const regionItem = item.regions?.[regionId];
-    return regionItem ? regionItem[metric] : null;
+  if (regionId) {
+    const regionItem = getRegionHistoryStats(item, regionId);
+    if (regionItem && Number.isFinite(regionItem[metric])) {
+      return regionItem[metric];
+    }
   }
   return item[metric];
 }
@@ -2290,10 +2308,32 @@ function resetSourceContext() {
   analysisStatus.value = "ready";
   analysisStartedAt.value = null;
   recentAlerts.value = [];
+  clearAlertPopups();
   regions.value = [];
+  historyRegionId.value = "";
+  queryRegionId.value = "";
+  queryResult.value = null;
   historyData.value = { series: [] };
   resetLiveFrame();
   disconnectRealtime();
+}
+
+function syncRegionSelection() {
+  const firstRegionId = regions.value[0]?.region_id || "";
+
+  if (!regions.value.some((region) => region.region_id === historyRegionId.value)) {
+    historyRegionId.value = "";
+  }
+  if (!regions.value.some((region) => region.region_id === queryRegionId.value)) {
+    queryRegionId.value = firstRegionId;
+    queryResult.value = null;
+  }
+  if (!regions.value.some((region) => region.region_id === selectedRegionId.value)) {
+    selectedRegionId.value = firstRegionId;
+  }
+  if (!firstRegionId) {
+    queryResult.value = null;
+  }
 }
 
 async function loadSystemStatus() {
@@ -2338,22 +2378,23 @@ async function loadSources(preferredSourceId?: string) {
 
 async function loadSourceContext(sourceId: string) {
   busy.context = true;
-  historyRegionId.value = "all";
   resetLiveFrame();
   disconnectRealtime();
+  queryResult.value = null;
 
+  const regionTask = loadRegions(sourceId);
   const tasks = await Promise.allSettled([
     loadAnalysisState(sourceId),
-    loadRegions(sourceId),
-    loadCrosslines(sourceId),
+    regionTask,
     loadThresholds(sourceId),
     loadRecentAlerts(sourceId),
-    refreshHistory(sourceId),
   ]);
+  await regionTask.catch(() => undefined);
+  const historyResult = await Promise.allSettled([refreshHistory(sourceId)]);
 
   busy.context = false;
 
-  if (tasks.some((item) => item.status === "rejected")) {
+  if ([...tasks, ...historyResult].some((item) => item.status === "rejected")) {
     pushToast("部分数据刷新失败，已显示可用内容。", "warning");
   }
 
@@ -2381,183 +2422,7 @@ async function loadRegions(sourceId: string) {
   const data = await apiGet<RegionListResponse>(`/regions?source_id=${encodeURIComponent(sourceId)}`);
   if (sourceId !== selectedSourceId.value) return;
   regions.value = data.regions || [];
-}
-
-async function loadCrosslines(sourceId: string) {
-  const data = await apiGet<CrossLineListResponse>(`/crosslines?source_id=${encodeURIComponent(sourceId)}`);
-  if (sourceId !== selectedSourceId.value) return;
-  crosslines.value = data.lines || [];
-}
-
-async function deleteCrossline(lineId: string) {
-  await apiDelete(`/crosslines/${lineId}`);
-  if (selectedSourceId.value) {
-    await loadCrosslines(selectedSourceId.value);
-  }
-}
-
-const crosslineEditorReferenceLines = computed(() =>
-  crosslines.value.filter((line) => line.line_id !== crosslineModal.lineId)
-);
-
-const crosslineEditorHint = computed(() => {
-  if (!crosslineEditor.startPoint) return "点击画面设置起点";
-  if (!crosslineEditor.endPoint) return "点击画面设置终点";
-  return "拖拽端点可微调位置";
-});
-
-const crosslineEditorStatus = computed(() => {
-  if (!crosslineEditor.startPoint) return "0/2 端点";
-  if (!crosslineEditor.endPoint) return "1/2 端点";
-  return "已完成 — 可拖拽调整";
-});
-
-function crosslineHandleStyle(point: RegionPoint) {
-  return {
-    left: `${point[0]}%`,
-    top: `${point[1]}%`,
-    backgroundColor: crosslineModal.color,
-  };
-}
-
-function openCrosslineModal(line?: CrossLine) {
-  if (!selectedSourceId.value) {
-    pushToast("请先选择数据源。", "warning");
-    return;
-  }
-  crosslineModal.open = true;
-  crosslineModal.lineId = line?.line_id || "";
-  crosslineModal.name = line?.name || `计数线 ${crosslines.value.length + 1}`;
-  crosslineModal.color = line?.color || "#00FF00";
-  crosslineEditor.startPoint = line ? [clampPercent(line.start_x), clampPercent(line.start_y)] : null;
-  crosslineEditor.endPoint = line ? [clampPercent(line.end_x), clampPercent(line.end_y)] : null;
-  crosslineEditor.hoverPoint = null;
-  crosslineDrag.index = -1;
-  crosslineDrag.active = false;
-}
-
-function closeCrosslineModal() {
-  crosslineModal.open = false;
-  crosslineEditor.hoverPoint = null;
-  crosslineDrag.index = -1;
-  crosslineDrag.active = false;
-}
-
-function clearCrosslineEditor() {
-  crosslineEditor.startPoint = null;
-  crosslineEditor.endPoint = null;
-  crosslineEditor.hoverPoint = null;
-}
-
-function getCrosslineStagePoint(event: PointerEvent | MouseEvent) {
-  if (!crosslineStageRef.value) return null;
-  const rect = crosslineStageRef.value.getBoundingClientRect();
-  if (!rect.width || !rect.height) return null;
-  const rawX = ((event.clientX - rect.left) / rect.width) * 100;
-  const rawY = ((event.clientY - rect.top) / rect.height) * 100;
-  if (rawX < 0 || rawX > 100 || rawY < 0 || rawY > 100) return null;
-  return [clampPercent(rawX), clampPercent(rawY)] as RegionPoint;
-}
-
-function handleCrosslineStageClick(event: MouseEvent) {
-  if (crosslineDrag.active) {
-    crosslineDrag.active = false;
-    crosslineDrag.index = -1;
-    return;
-  }
-  const point = getCrosslineStagePoint(event);
-  if (!point) return;
-
-  if (!crosslineEditor.startPoint) {
-    crosslineEditor.startPoint = point;
-  } else if (!crosslineEditor.endPoint) {
-    crosslineEditor.endPoint = point;
-    crosslineEditor.hoverPoint = null;
-  }
-}
-
-function handleCrosslineStagePointerMove(event: PointerEvent) {
-  const point = getCrosslineStagePoint(event);
-  if (!point) return;
-
-  if (crosslineDrag.index >= 0) {
-    crosslineDrag.active = true;
-    if (crosslineDrag.index === 0) {
-      crosslineEditor.startPoint = point;
-    } else {
-      crosslineEditor.endPoint = point;
-    }
-    return;
-  }
-
-  if (crosslineEditor.startPoint && !crosslineEditor.endPoint) {
-    crosslineEditor.hoverPoint = point;
-  }
-}
-
-function startCrosslineHandleDrag(index: number, event: PointerEvent) {
-  event.preventDefault();
-  crosslineDrag.index = index;
-  crosslineDrag.active = false;
-}
-
-function handleCrosslineEditorPointerUp() {
-  if (!crosslineModal.open || crosslineDrag.index < 0) return;
-  crosslineDrag.index = -1;
-}
-
-function requestDeleteCrossline(line: CrossLine) {
-  openConfirmDialog({
-    title: "删除计数线",
-    message: `确定删除计数线「${line.name}」吗？此操作不可撤销。`,
-    actionLabel: "删除",
-    tone: "error",
-    action: async () => {
-      await deleteCrossline(line.line_id);
-      pushToast("计数线已删除。", "success");
-    },
-  });
-}
-
-async function submitCrosslineModal() {
-  if (!selectedSourceId.value) return;
-  if (!crosslineEditor.startPoint || !crosslineEditor.endPoint) return;
-  if (!crosslineModal.name.trim()) {
-    pushToast("请填写线段名称。", "warning");
-    return;
-  }
-
-  busy.crosslineSubmit = true;
-  try {
-    const payload = {
-      name: crosslineModal.name.trim(),
-      color: crosslineModal.color,
-      start_x: crosslineEditor.startPoint[0],
-      start_y: crosslineEditor.startPoint[1],
-      end_x: crosslineEditor.endPoint[0],
-      end_y: crosslineEditor.endPoint[1],
-    };
-
-    if (crosslineModal.lineId) {
-      await apiPut(`/crosslines/${encodeURIComponent(crosslineModal.lineId)}`, payload);
-    } else {
-      await apiPost("/crosslines", {
-        source_id: selectedSourceId.value,
-        ...payload,
-      });
-    }
-
-    closeCrosslineModal();
-    await loadCrosslines(selectedSourceId.value);
-    pushToast("计数线已保存。", "success");
-    if (analysisStatus.value === "running") {
-      pushToast("计数线修改后，建议重新开始分析以应用。", "warning", 4200);
-    }
-  } catch (error) {
-    pushToast(extractErrorMessage(error), "error");
-  } finally {
-    busy.crosslineSubmit = false;
-  }
+  syncRegionSelection();
 }
 
 async function loadThresholds(sourceId: string) {
@@ -2831,22 +2696,22 @@ function connectRealtime() {
       }
 
       if (payload.type === "alert") {
+        const nextAlert = {
+          alert_id: payload.data.alert_id,
+          alert_type: payload.data.alert_type,
+          level: payload.data.level,
+          region_id: payload.data.region_id,
+          region_name: payload.data.region_name,
+          current_value: payload.data.current_value,
+          threshold: payload.data.threshold,
+          timestamp: payload.data.timestamp,
+          message: payload.data.message,
+        };
         recentAlerts.value = [
-          {
-            alert_id: payload.data.alert_id,
-            alert_type: payload.data.alert_type,
-            level: payload.data.level,
-            region_id: payload.data.region_id,
-            region_name: payload.data.region_name,
-            current_value: payload.data.current_value,
-            threshold: payload.data.threshold,
-            timestamp: payload.data.timestamp,
-            message: payload.data.message,
-          },
+          nextAlert,
           ...recentAlerts.value.filter((item) => item.alert_id !== payload.data.alert_id),
         ].slice(0, 8);
-
-        pushToast(payload.data.message, payload.data.level === "critical" ? "error" : "warning", 4200);
+        showAlertPopup(nextAlert);
       }
     } catch {
       pushToast("实时数据解析失败。", "warning");
@@ -3620,6 +3485,10 @@ async function submitExportModal() {
   }
 }
 
+function selectRegionFromNav(regionId: string) {
+  selectedRegionId.value = regionId;
+}
+
 function scrollToSection(section: SectionKey) {
   activeSection.value = section;
   const targetMap: Record<SectionKey, HTMLElement | null> = {
@@ -3627,6 +3496,7 @@ function scrollToSection(section: SectionKey) {
     history: historySection.value,
     query: querySection.value,
     alerts: alertsSection.value,
+    regions: regionsSection.value,
   };
   targetMap[section]?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -3637,6 +3507,7 @@ function syncActiveSection() {
     { key: "history", el: historySection.value },
     { key: "query", el: querySection.value },
     { key: "alerts", el: alertsSection.value },
+    { key: "regions", el: regionsSection.value },
   ];
 
   const current = sections
@@ -3655,9 +3526,33 @@ watch([historyWindow, historyInterval], () => {
   }
 });
 
-watch([historyMetric, historyRegionId], async () => {
+watch(historyRegionId, () => {
+  if (historyRegionId.value) {
+    selectedRegionId.value = historyRegionId.value;
+  }
+  queryResult.value = null;
+  void nextTick().then(() => renderHistoryChart());
+});
+
+watch(historyMetric, async () => {
   await nextTick();
   renderHistoryChart();
+});
+
+watch(queryRegionId, () => {
+  if (queryRegionId.value) {
+    selectedRegionId.value = queryRegionId.value;
+  }
+  queryResult.value = null;
+});
+
+watch(selectedRegionId, (regionId) => {
+  if (!regionId) {
+    return;
+  }
+  historyRegionId.value = regionId;
+  queryRegionId.value = regionId;
+  queryResult.value = null;
 });
 
 watch(drawerOpen, async () => {
@@ -3684,7 +3579,6 @@ onMounted(async () => {
   window.addEventListener("resize", resizeHistoryChart);
   window.addEventListener("pointermove", handleRegionEditorPointerMove);
   window.addEventListener("pointerup", handleRegionEditorPointerUp);
-  window.addEventListener("pointerup", handleCrosslineEditorPointerUp);
 
   await Promise.all([loadSystemStatus(), loadSources()]);
   await nextTick();
@@ -3709,13 +3603,13 @@ onBeforeUnmount(() => {
   }
   clearReconnectTimer();
   clearHeartbeatTimer();
+  clearAlertPopups();
   disconnectRealtime();
   historyChart.value?.dispose();
   window.removeEventListener("scroll", syncActiveSection);
   window.removeEventListener("resize", resizeHistoryChart);
   window.removeEventListener("pointermove", handleRegionEditorPointerMove);
   window.removeEventListener("pointerup", handleRegionEditorPointerUp);
-  window.removeEventListener("pointerup", handleCrosslineEditorPointerUp);
 });
 </script>
 
@@ -3810,6 +3704,7 @@ onBeforeUnmount(() => {
 .brand-lockup__text strong {
   font-size: 13px;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .brand-lockup__text small {
@@ -3844,6 +3739,37 @@ onBeforeUnmount(() => {
   background: rgba(37, 99, 235, 0.1);
   color: var(--primary);
   transform: translateY(-1px);
+}
+
+.nav-region-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nav-group-label {
+  padding: 0 8px;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.nav-list--regions {
+  flex: 0 0 auto;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.nav-item--region {
+  min-height: 54px;
+  gap: 4px;
+}
+
+.nav-region-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
 }
 
 .workspace {
@@ -3934,6 +3860,7 @@ onBeforeUnmount(() => {
 
 .hero-grid,
 .overview-grid,
+.region-focus-grid,
 .history-grid,
 .alerts-grid {
   display: grid;
@@ -3954,7 +3881,30 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.topbar-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+  border-radius: 24px;
+  padding: 12px 16px;
   margin-bottom: 14px;
+}
+
+.topbar-card__status {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+.button--icon {
+  min-width: 36px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 12px;
 }
 
 .overview-header__source {
@@ -3981,78 +3931,186 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
+.region-monitor {
+  min-width: 0;
+}
+
+.region-monitor__panel {
+  border-radius: 18px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.region-monitor__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.region-monitor__head strong {
+  display: block;
+  font-size: 15px;
+}
+
+.region-monitor__head small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.region-monitor__hint {
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(248, 250, 252, 0.84);
+  border: 1px dashed rgba(148, 163, 184, 0.24);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.region-monitor__hint strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.region-monitor__hint small {
+  display: block;
+  color: var(--muted);
+  line-height: 1.55;
+  font-size: 12px;
+}
+
+.region-monitor__list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.region-monitor-card {
+  border-radius: 16px;
+  padding: 12px;
+  background: rgba(248, 250, 252, 0.86);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.region-monitor-card__preview {
+  position: relative;
+  min-height: 116px;
+  border-radius: 14px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 14% 18%, rgba(37, 99, 235, 0.22), transparent 36%),
+    linear-gradient(140deg, #0f172a 0%, #12324c 48%, #164e63 100%);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.region-monitor-card__preview-svg,
+.region-monitor-card__preview-empty {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.region-monitor-card__preview-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: rgba(248, 250, 252, 0.92);
+  font-size: 12px;
+}
+
+.region-monitor-card[data-tone="danger"] {
+  border-color: rgba(220, 38, 38, 0.26);
+  box-shadow: inset 3px 0 0 rgba(220, 38, 38, 0.88);
+}
+
+.region-monitor-card[data-tone="warning"] {
+  border-color: rgba(249, 115, 22, 0.24);
+  box-shadow: inset 3px 0 0 rgba(249, 115, 22, 0.88);
+}
+
+.region-monitor-card[data-tone="success"] {
+  border-color: rgba(22, 163, 74, 0.18);
+  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.78);
+}
+
+.region-monitor-card__head,
+.region-monitor-card__foot {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.region-monitor-card__title {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.region-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  margin-top: 6px;
+}
+
+.region-monitor-card__title strong {
+  display: block;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.region-monitor-card__title small,
+.region-monitor-card__foot small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.region-monitor-card__metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.region-monitor-card__metric {
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.region-monitor-card__metric span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.region-monitor-card__metric strong {
+  font-size: 20px;
+  line-height: 1.2;
+  font-family: var(--font-mono);
+}
+
 .live-sidebar {
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-
-/* --- 区域监测横条 --- */
-.region-bar {
-  margin-top: 14px;
-}
-.region-bar__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-  font-size: 13px;
-  color: var(--fg);
-}
-.region-bar__list {
-  display: flex;
-  gap: 10px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-}
-.region-bar__card {
-  flex: 1;
-  min-width: 140px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  transition: border-color 0.2s;
-}
-.region-bar__card[data-tone="danger"] {
-  border-left: 3px solid var(--danger);
-}
-.region-bar__card[data-tone="warning"] {
-  border-left: 3px solid var(--accent);
-}
-.region-bar__card[data-tone="success"] {
-  border-left: 3px solid var(--success, #22c55e);
-}
-.region-bar__card .region-swatch {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.region-bar__card-body {
-  flex: 1;
-  min-width: 0;
-}
-.region-bar__card-body strong {
-  display: block;
-  font-size: 13px;
-  margin-bottom: 2px;
-}
-.region-bar__card-stats {
-  display: flex;
-  gap: 12px;
-  font-size: 13px;
-  font-family: var(--font-mono);
-}
-.region-bar__card-stats span:first-child {
-  font-weight: 600;
-}
-.region-bar__density {
-  color: var(--muted);
-  font-size: 12px;
 }
 
 .live-sidebar__metrics {
@@ -4097,6 +4155,96 @@ onBeforeUnmount(() => {
   border-color: rgba(249, 115, 22, 0.22);
 }
 
+.live-sidebar__regions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.live-sidebar__section-label {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0 2px;
+  margin-bottom: 2px;
+}
+
+.live-region-card {
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+
+.live-region-card:hover {
+  border-color: var(--primary);
+  background: rgba(37, 99, 235, 0.05);
+}
+
+.live-region-card[data-tone="danger"] {
+  border-color: rgba(220, 38, 38, 0.35);
+}
+
+.live-region-card[data-tone="warning"] {
+  border-color: rgba(217, 119, 6, 0.35);
+}
+
+.live-region-card__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+  min-width: 0;
+  flex: 1;
+}
+
+.live-region-card__head > span:nth-child(2) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.live-region-card__alert-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.live-region-card__alert-dot[data-tone="danger"] {
+  background: var(--danger, #dc2626);
+}
+
+.live-region-card__alert-dot[data-tone="warning"] {
+  background: var(--accent, #f97316);
+}
+
+.live-region-card__count {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.live-region-card__count strong {
+  font-size: 16px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.live-region-card__count small {
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .live-metric-card[data-tone="success"] {
   border-color: rgba(22, 163, 74, 0.22);
 }
@@ -4135,6 +4283,89 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.region-focus-grid {
+  align-items: start;
+}
+
+.region-focus-stage {
+  position: relative;
+  min-height: 420px;
+  border-radius: 24px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 14% 18%, rgba(37, 99, 235, 0.22), transparent 36%),
+    linear-gradient(140deg, #0f172a 0%, #12324c 48%, #164e63 100%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.region-focus-stage__svg,
+.region-focus-stage__overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.region-focus-stage__outline {
+  fill: rgba(255, 255, 255, 0.04);
+  stroke-width: 0.9;
+  vector-effect: non-scaling-stroke;
+}
+
+.region-focus-stage__overlay {
+  pointer-events: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 14px;
+}
+
+.region-focus-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.region-focus-metric,
+.region-focus-note {
+  border-radius: 18px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.region-focus-metric span,
+.region-focus-note small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.region-focus-metric strong {
+  font-size: 28px;
+  line-height: 1.1;
+  font-family: var(--font-mono);
+}
+
+.region-focus-note strong {
+  font-size: 14px;
+}
+
+.region-focus-note p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.region-focus-note--alert[data-tone="danger"] {
+  border-color: rgba(220, 38, 38, 0.22);
+}
+
+.region-focus-note--alert[data-tone="warning"] {
+  border-color: rgba(249, 115, 22, 0.22);
 }
 
 .query-stat-grid {
@@ -4327,6 +4558,17 @@ onBeforeUnmount(() => {
     linear-gradient(rgba(255, 255, 255, 0.09) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.09) 1px, transparent 1px);
   background-size: 36px 36px;
+}
+
+.video-stage__label-mask {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 140px;
+  height: 40px;
+  background: linear-gradient(to left, rgba(0, 0, 0, 0.75) 40%, transparent 100%);
+  pointer-events: none;
+  z-index: 4;
 }
 
 .video-stage__empty {
@@ -4660,6 +4902,207 @@ onBeforeUnmount(() => {
   color: var(--muted);
 }
 
+/* ── Regions Panel ──────────────────────────────────────── */
+.regions-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.regions-panel__frame-card {
+  position: sticky;
+  top: 80px;
+}
+
+.regions-panel__preview {
+  position: sticky;
+  top: 80px;
+}
+
+.regions-preview-frame {
+  position: relative;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--surface-muted, #f0f4f8);
+  aspect-ratio: 16/9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+}
+
+.regions-preview-frame__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.regions-preview-frame__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.regions-preview-frame__chips {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.regions-panel__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.region-compact-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.region-compact-card__preview {
+  position: relative;
+  aspect-ratio: 16/9;
+  background: rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+.region-compact-card__preview.is-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
+.region-compact-card__preview-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.region-compact-card__preview-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--muted);
+}
+
+.region-compact-card__body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.region-compact-card:hover {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+}
+
+.region-compact-card[data-tone="danger"] {
+  border-color: rgba(220, 38, 38, 0.4);
+}
+
+.region-compact-card[data-tone="warning"] {
+  border-color: rgba(217, 119, 6, 0.4);
+}
+
+.region-compact-card__body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.region-compact-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.region-compact-card__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.region-compact-card__name strong {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.region-compact-card__metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 8px;
+}
+
+.region-compact-card__metric {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.region-compact-card__metric span {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.region-compact-card__metric strong {
+  font-size: 13px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.region-compact-card__alert-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.region-compact-card__alert-fill {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.region-compact-card[data-tone="danger"] .region-compact-card__alert-fill {
+  background: var(--danger, #dc2626);
+}
+
+.region-compact-card__alert-bar > small {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.soft-chip--xs {
+  padding: 2px 6px;
+  font-size: 10px;
+  gap: 3px;
+}
+
 .metric-card__icon,
 .status-chip,
 .soft-chip,
@@ -4698,7 +5141,7 @@ onBeforeUnmount(() => {
   padding-right: 4px;
 }
 
-/* form-grid--double used by crossline and region editor forms */
+/* form-grid--double used by region editor forms */
 
 .stack-scroll {
   max-height: 440px;
@@ -4730,11 +5173,20 @@ onBeforeUnmount(() => {
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
-  transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+  transition: transform 0.15s ease, background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.button:hover {
+.button:hover:not(:disabled) {
   transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.1);
+}
+
+.button:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
+  box-shadow: none;
 }
 
 .button:disabled {
@@ -4804,6 +5256,10 @@ onBeforeUnmount(() => {
   color: var(--danger);
   background: rgba(220, 38, 38, 0.08);
   border-color: rgba(220, 38, 38, 0.18);
+}
+
+.soft-chip--button {
+  cursor: pointer;
 }
 
 .region-row,
@@ -5261,6 +5717,218 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
+.alert-popup-stack {
+  position: fixed;
+  top: 96px;
+  right: 24px;
+  z-index: 55;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.alert-popup-card {
+  min-width: 320px;
+  max-width: 360px;
+  border-radius: 20px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  box-shadow: 0 22px 48px rgba(15, 23, 42, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.alert-popup-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 28px 60px rgba(15, 23, 42, 0.22);
+}
+
+.alert-popup-card[data-tone="danger"] {
+  border-color: rgba(220, 38, 38, 0.24);
+}
+
+.alert-popup-card[data-tone="warning"] {
+  border-color: rgba(249, 115, 22, 0.24);
+}
+
+.alert-popup-card__header,
+.alert-popup-card__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.alert-popup-card__level {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.alert-popup-card[data-tone="danger"] .alert-popup-card__level {
+  color: var(--danger);
+}
+
+.alert-popup-card[data-tone="warning"] .alert-popup-card__level {
+  color: var(--accent);
+}
+
+.alert-popup-card > strong {
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.alert-popup-card > p,
+.alert-popup-card > small {
+  margin: 0;
+}
+
+.alert-popup-card > p {
+  color: var(--text);
+  line-height: 1.55;
+}
+
+.alert-popup-card > small {
+  color: var(--muted);
+}
+
+/* Alert Detail Modal */
+.modal-overlay--alert {
+  z-index: 120;
+}
+
+.modal-card--alert {
+  max-width: 480px;
+  width: 92vw;
+}
+
+.modal-card--alert[data-tone="danger"] {
+  border-top: 3px solid var(--danger);
+}
+
+.modal-card--alert[data-tone="warning"] {
+  border-top: 3px solid var(--accent);
+}
+
+.alert-modal-head__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.alert-modal-head__copy h3 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.alert-modal-head__copy small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.alert-modal-level {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.alert-modal-level[data-tone="danger"] {
+  color: var(--danger);
+}
+
+.alert-modal-level[data-tone="warning"] {
+  color: var(--accent);
+}
+
+.alert-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.alert-modal-message {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.6;
+  font-size: 15px;
+}
+
+.alert-modal-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.alert-modal-progress__labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.alert-modal-progress__bar-wrap {
+  height: 8px;
+  border-radius: 99px;
+  background: rgba(148, 163, 184, 0.18);
+  overflow: hidden;
+}
+
+.alert-modal-progress__bar {
+  height: 100%;
+  border-radius: 99px;
+  background: var(--danger);
+  transition: width 0.4s ease;
+}
+
+.modal-card--alert[data-tone="warning"] .alert-modal-progress__bar {
+  background: var(--accent);
+}
+
+.alert-modal-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.alert-modal-meta__item {
+  background: rgba(248, 250, 252, 0.8);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.alert-modal-meta__item span {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.alert-modal-meta__item strong {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
 .empty-box {
   border-radius: 18px;
   padding: 16px;
@@ -5529,96 +6197,6 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
-/* --- Crossline Editor --- */
-
-.modal-card--crossline {
-  width: min(960px, 100%);
-  height: min(72vh, 700px);
-  min-height: 0;
-}
-
-.crossline-editor {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1.8fr) minmax(240px, 0.7fr);
-  gap: 18px;
-}
-
-.crossline-editor__stage-panel {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.crossline-editor__sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.crossline-editor__toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.crossline-editor__toolbar-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.crossline-editor__hint {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.crossline-editor__summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.crossline-editor__reference {
-  stroke-opacity: 0.34;
-  stroke-width: 0.5;
-  stroke-dasharray: 1.4 1.2;
-  vector-effect: non-scaling-stroke;
-}
-
-.crossline-editor__draft-line {
-  stroke-width: 0.6;
-  stroke-opacity: 0.9;
-  vector-effect: non-scaling-stroke;
-}
-
-.crossline-editor__preview-line {
-  stroke-width: 0.4;
-  stroke-opacity: 0.5;
-  stroke-dasharray: 1.2 1;
-  vector-effect: non-scaling-stroke;
-}
-
-.crossline-editor__coords {
-  padding: 12px;
-  border-radius: 14px;
-  background: rgba(37, 99, 235, 0.04);
-  border: 1px solid rgba(37, 99, 235, 0.1);
-}
-
-.crossline-editor__coord-value {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-}
-
 .toggle-group--modal {
   width: fit-content;
 }
@@ -5657,9 +6235,11 @@ onBeforeUnmount(() => {
 @media (max-width: 1200px) {
   .hero-grid,
   .overview-grid,
+  .region-focus-grid,
   .history-grid,
   .alerts-grid,
-  .monitor-grid {
+  .monitor-grid,
+  .regions-panel {
     grid-template-columns: 1fr;
   }
 
@@ -5707,6 +6287,13 @@ onBeforeUnmount(() => {
     height: auto;
   }
 
+  .region-monitor__hint,
+  .region-monitor-card__head,
+  .region-monitor-card__foot {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
   .chart-surface {
     height: 320px;
   }
@@ -5747,14 +6334,6 @@ onBeforeUnmount(() => {
     min-height: 320px;
   }
 
-  .crossline-editor {
-    grid-template-columns: 1fr;
-  }
-
-  .modal-card--crossline {
-    width: min(960px, 100%);
-    height: min(88vh, 860px);
-  }
 }
 
 @media (max-width: 820px) {
@@ -5774,6 +6353,16 @@ onBeforeUnmount(() => {
   .nav-list {
     flex-direction: row;
     justify-content: center;
+  }
+
+  .nav-region-group {
+    flex: 1;
+  }
+
+  .nav-list--regions {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
   }
 
   .nav-item {
@@ -5821,6 +6410,22 @@ onBeforeUnmount(() => {
   .soft-chip,
   .field {
     min-height: 44px;
+  }
+
+  .region-monitor-card__metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .alert-popup-stack,
+  .toast-stack {
+    left: 16px;
+    right: 16px;
+  }
+
+  .alert-popup-card,
+  .toast-card {
+    min-width: 0;
+    max-width: none;
   }
 
   .config-drawer {

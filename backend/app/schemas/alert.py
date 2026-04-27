@@ -10,11 +10,13 @@ from pydantic import BaseModel, Field
 
 
 class RegionThreshold(BaseModel):
-    """单个区域阈值"""
+    """单个区域阈值（按 region_id 键控）"""
 
     name: str = Field(..., description="区域名称")
-    warning: int = Field(..., description="预警阈值")
-    critical: int = Field(..., description="严重阈值")
+    count_warning: Optional[int] = Field(default=None, description="人数预警阈值")
+    count_critical: Optional[int] = Field(default=None, description="人数严重阈值")
+    density_warning: Optional[float] = Field(default=None, description="密度预警阈值")
+    density_critical: Optional[float] = Field(default=None, description="密度严重阈值")
 
 
 class AlertThresholdGet(BaseModel):
@@ -25,7 +27,7 @@ class AlertThresholdGet(BaseModel):
     default_region_warning: int = Field(..., description="区域默认预警阈值")
     default_region_critical: int = Field(..., description="区域默认严重阈值")
     region_thresholds: dict[str, RegionThreshold] = Field(
-        default_factory=dict, description="各区域独立阈值配置"
+        default_factory=dict, description="各区域独立阈值配置（按 region_id 键控，来源于 Region）"
     )
     cooldown_seconds: int = Field(default=30, description="告警冷却时间(秒)")
 
@@ -39,7 +41,7 @@ class AlertThresholdUpdate(BaseModel):
     default_region_warning: Optional[int] = Field(default=None, description="区域默认预警阈值")
     default_region_critical: Optional[int] = Field(default=None, description="区域默认严重阈值")
     region_thresholds: Optional[dict[str, RegionThreshold]] = Field(
-        default=None, description="各区域独立阈值配置"
+        default=None, description="各区域独立阈值配置（按 region_id 键控）"
     )
     cooldown_seconds: Optional[int] = Field(default=None, description="告警冷却时间")
 
@@ -49,7 +51,7 @@ class AlertResponse(BaseModel):
 
     alert_id: str = Field(..., description="告警 ID")
     source_id: str = Field(..., description="数据源 ID")
-    alert_type: str = Field(..., description="告警类型: total_count/region_count/region_density")
+    alert_type: str = Field(..., description="告警类型: region_count/region_density")
     level: str = Field(..., description="级别: warning/critical")
     region_name: Optional[str] = Field(default=None, description="区域名称")
     current_value: float = Field(..., description="当前值")
@@ -64,7 +66,7 @@ class AlertRecentItem(BaseModel):
     """最近告警项（简化版）"""
 
     alert_id: str = Field(..., description="告警 ID")
-    alert_type: str = Field(..., description="告警类型: total_count/region_count")
+    alert_type: str = Field(..., description="告警类型: region_count/region_density")
     level: str = Field(..., description="级别: warning/critical")
     region_id: Optional[str] = Field(default=None, description="区域 ID")
     region_name: Optional[str] = Field(default=None, description="区域名称")

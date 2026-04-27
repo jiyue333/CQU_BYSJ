@@ -11,7 +11,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.stats_aggregated import StatsAggregated, RegionStatsData
+from app.models.stats_aggregated import StatsAggregated
 
 
 def _normalize_time(time_str: str) -> str:
@@ -161,6 +161,8 @@ class StatsRepository:
                     "max": r.max,
                     "min": r.min,
                     "density_avg": r.density_avg,
+                    "in_total": r.in_total,
+                    "out_total": r.out_total,
                 })
         return result
 
@@ -192,9 +194,6 @@ class StatsRepository:
             existing.total_count_max = stat.total_count_max
             existing.total_count_min = stat.total_count_min
             existing.total_density_avg = stat.total_density_avg
-            existing.crossline_in_total = stat.crossline_in_total
-            existing.crossline_out_total = stat.crossline_out_total
-            existing.crossline_stats = stat.crossline_stats
             existing.region_stats = stat.region_stats
             existing.sample_count = stat.sample_count
             self.db.commit()
